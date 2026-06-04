@@ -94,70 +94,73 @@
           <span class="card-tag">NUEVO CASO</span>
         </div>
 
+        <!-- Input oculto para compatibilidad con calcularPropuestas -->
+        <input type="hidden" id="inputDescuento" value="" />
+
         <div class="form-grid">
           <div class="form-group">
-            <label class="form-label" for="inputDni">DNI del Deudor</label>
-            <input
-              type="text"
-              id="inputDni"
-              class="form-input"
-              placeholder="Ej: 30456789"
-              inputmode="numeric"
-              maxlength="10"
-            />
+            <label class="form-label" for="inputNombre">Nombre y Apellido</label>
+            <input type="text" id="inputNombre" class="form-input" placeholder="Ej: Juan Pérez" />
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="inputNombre">Nombre y Apellido</label>
-            <input
-              type="text"
-              id="inputNombre"
-              class="form-input"
-              placeholder="Ej: Juan Pérez"
-            />
+            <label class="form-label" for="inputDni">DNI del Deudor</label>
+            <input type="text" id="inputDni" class="form-input"
+                   placeholder="Ej: 30456789" inputmode="numeric" maxlength="10" />
           </div>
 
           <div class="form-group">
             <label class="form-label" for="inputDeuda">
-              Saldo Deuda Total / Financiera
-              <span class="label-required">*</span>
+              Saldo Deuda Banco <span class="label-required">*</span>
             </label>
             <div class="input-prefix-wrap">
               <span class="input-prefix">$</span>
-              <input
-                type="text"
-                id="inputDeuda"
-                class="form-input with-prefix"
-                placeholder="0,00"
-                inputmode="decimal"
-              />
+              <input type="text" id="inputDeuda" class="form-input with-prefix"
+                     placeholder="0,00" inputmode="decimal" />
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="inputDescuento">Porcentaje de Quita a Ofrecer (%)</label>
+            <label class="form-label">Deuda actual + honorarios <span class="form-label-hint">(base cálculo)</span></label>
             <div class="input-prefix-wrap">
-              <input
-                type="number"
-                id="inputDescuento"
-                class="form-input with-prefix"
-                placeholder="Ej: 70"
-                min="0"
-                max="100"
-                step="1"
-              />
-              <span class="input-suffix">%</span>
+              <span class="input-prefix">$</span>
+              <input type="text" id="inputBase" class="form-input with-prefix form-input-readonly"
+                     readonly placeholder="0,00" tabindex="-1" />
             </div>
           </div>
+        </div>
 
-          <div class="form-group">
-            <label class="form-label" for="inputGrupo">Grupo de Producto</label>
-            <select id="inputGrupo" class="form-input form-select">
-              <option value="CO">CO — Consumo</option>
-              <option value="LEG">LEG — Legal</option>
-              <option value="SA">SA — Salud</option>
-            </select>
+        <!-- Búsqueda por monto del cliente (opcional) -->
+        <div class="monto-cliente-toggle-row">
+          <button class="btn-monto-cliente-toggle" id="btnMontoClienteToggle"
+                  onclick="switchModoCalculo('inverso')" type="button">
+            💡 Buscar por monto que puede pagar el cliente
+          </button>
+        </div>
+        <div id="fieldMontoCliente" style="display:none;" class="field-monto-cliente-wrap">
+          <div class="monto-tipo-row">
+            <label class="monto-tipo-opt">
+              <input type="radio" name="montoTipo" value="cuota" checked
+                     onchange="actualizarLabelMontoCliente()" /> Por cuota
+            </label>
+            <label class="monto-tipo-opt">
+              <input type="radio" name="montoTipo" value="total"
+                     onchange="actualizarLabelMontoCliente()" /> Total a pagar
+            </label>
           </div>
+          <div class="input-prefix-wrap" style="margin-top:6px;">
+            <span class="input-prefix">$</span>
+            <input type="text" id="inputMontoCliente" class="form-input with-prefix"
+                   placeholder="0,00" inputmode="decimal" />
+          </div>
+          <span id="montoClienteHint" class="inverso-hint"></span>
+          <button class="btn-primary" style="margin-top:10px;width:100%"
+                  onclick="calcularInverso()" type="button">
+            ◈ Ver opciones para ese monto
+          </button>
+          <button class="btn-cerrar-monto" onclick="switchModoCalculo('descuento')" type="button">
+            ✕ Cerrar
+          </button>
         </div>
 
         <!-- PRODUCTOS DEL ACUERDO -->
@@ -169,7 +172,6 @@
           <div id="productosList" class="productos-list">
             <!-- filas dinámicas -->
           </div>
-          <!-- Honorarios siempre fijo al final -->
           <div class="producto-fijo">
             <span class="producto-fijo-icon">🏢</span>
             <span class="producto-fijo-label">Honorarios de Gestión Extrajudicial — Estudio CO-RE</span>
@@ -177,10 +179,41 @@
           </div>
         </div>
 
-        <button class="btn-primary" onclick="calcularPropuestas()">
-          <span class="btn-icon">◈</span>
-          Calcular Propuestas
-        </button>
+        <!-- TABLA DE ESCENARIOS -->
+        <div id="tablaEscenariosWrap" class="tabla-esc-wrap" style="display:none;">
+          <div class="tabla-esc-header">
+            <span class="tabla-esc-title">📋 Tabla de escenarios</span>
+            <span class="tabla-esc-sub">Importes por cuota según % de quita · click en una fila para calcular</span>
+          </div>
+          <div id="tablaEscRefRow" class="tabla-esc-ref-row" style="display:none;">
+            <span id="tablaEscRefLabel"></span>
+          </div>
+          <div class="tabla-esc-table-wrap">
+            <table class="tabla-esc-table" id="tablaEscenariosTable">
+              <thead id="tablaEscenariosHead"></thead>
+              <tbody id="tablaEscenariosBody"></tbody>
+            </table>
+          </div>
+          <p class="tabla-esc-nota">
+            🟩 Dentro del límite · 🟨 Fuera del límite permitido · Celdas grises = no permitido para ese plan
+          </p>
+        </div>
+
+        <!-- PANEL SELECCIÓN MÚLTIPLE -->
+        <div id="panelSeleccionEsc" class="panel-seleccion-esc" style="display:none;">
+          <div class="panel-sel-header">
+            <span class="panel-sel-badge" id="seleccionBadge"></span>
+            <button class="btn-sel-limpiar" onclick="limpiarSeleccion()">✕ Limpiar selección</button>
+          </div>
+          <div id="seleccionLista"></div>
+          <div class="panel-sel-footer" id="panelSelFooter" style="display:none;">
+            <button class="btn-propuesta-combinada" onclick="copiarPropuestaCombinada()">
+              💬 Copiar propuesta combinada (todas las alternativas)
+            </button>
+          </div>
+        </div>
+
+
       </div>
 
       <!-- IMPUTACION NOTE -->
@@ -237,17 +270,7 @@
               </div>
             </div>
             <div class="separator"></div>
-            <div class="honorarios-block">
-              <div class="plan-detail-row">
-                <span class="hon-label">HAB (16%)</span>
-                <span id="hab1" class="detail-value mono"></span>
-              </div>
-              <div class="plan-detail-row">
-                <span class="hon-label">HAD (20% + IVA)</span>
-                <span id="had1" class="detail-value mono"></span>
-              </div>
-              <div class="had-badge">⚠️ HAD: Cobrable solo ante pago efectivo</div>
-            </div>
+
           </div>
           <div class="plan-urgency">⚠️ PROPUESTA VÁLIDA POR 48 HORAS HÁBILES</div>
           <div class="plan-actions">
@@ -308,17 +331,7 @@
               </div>
             </div>
             <div class="separator"></div>
-            <div class="honorarios-block">
-              <div class="plan-detail-row">
-                <span class="hon-label">HAB (16%)</span>
-                <span id="hab3" class="detail-value mono"></span>
-              </div>
-              <div class="plan-detail-row">
-                <span class="hon-label">HAD (20% + IVA)</span>
-                <span id="had3" class="detail-value mono"></span>
-              </div>
-              <div class="had-badge">⚠️ HAD: Cobrable solo ante pago efectivo</div>
-            </div>
+
           </div>
           <div class="plan-urgency">⚠️ PROPUESTA VÁLIDA POR 48 HORAS HÁBILES</div>
           <div class="plan-actions">
@@ -379,17 +392,7 @@
               </div>
             </div>
             <div class="separator"></div>
-            <div class="honorarios-block">
-              <div class="plan-detail-row">
-                <span class="hon-label">HAB (16%)</span>
-                <span id="hab6" class="detail-value mono"></span>
-              </div>
-              <div class="plan-detail-row">
-                <span class="hon-label">HAD (20% + IVA)</span>
-                <span id="had6" class="detail-value mono"></span>
-              </div>
-              <div class="had-badge">⚠️ HAD: Cobrable solo ante pago efectivo</div>
-            </div>
+
           </div>
           <div class="plan-urgency">⚠️ PROPUESTA VÁLIDA POR 48 HORAS HÁBILES</div>
           <div class="plan-actions">
@@ -403,41 +406,32 @@
         </div>
 
       </div>
-      <!-- END RESULTS -->
-
-      <!-- CUOTAS INTERMEDIAS -->
-      <div id="intermediasPanel" style="display:none;" class="intermedias-panel">
-        <button
-          id="intermediasToggle"
-          class="btn-intermedias-toggle"
-          aria-expanded="false"
-          onclick="toggleIntermedias()"
-        >
-          <span class="intermedias-toggle-icon">▼</span>
-          Ver opciones intermedias &nbsp;<span class="intermedias-toggle-hint">(2, 4 y 5 cuotas)</span>
-        </button>
-        <div id="intermediasBody" style="display:none;">
-          <p class="intermedias-nota">
-            ⚠️ Estas opciones usan el descuento máximo del plan anterior como límite.
-            Ofrecelas solo si el cliente rechaza las propuestas principales.
-          </p>
-          <div class="intermedias-table-wrap">
-            <table class="intermedias-table">
-              <thead>
-                <tr>
-                  <th>Plan</th>
-                  <th>Descuento</th>
-                  <th>Base (+hon.)</th>
-                  <th>Valor cuota</th>
-                  <th>Total a recuperar</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody id="tablaIntermedias"></tbody>
-            </table>
-          </div>
+      <!-- GRID INVERSO (modo por monto cliente) -->
+      <div id="gridInversoWrap" style="display:none;" class="grid-inverso-wrap">
+        <div class="grid-inverso-header">
+          <span class="grid-inverso-title">📊 Opciones viables para el cliente</span>
+          <span id="gridInversoSubtitle" class="grid-inverso-sub"></span>
+        </div>
+        <div class="grid-inverso-table-wrap">
+          <table class="grid-inverso-table">
+            <thead>
+              <tr>
+                <th>Plan</th>
+                <th>Total a pagar</th>
+                <th>Por cuota</th>
+                <th>Descuento</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="gridInversoBody"></tbody>
+          </table>
         </div>
       </div>
+
+      <!-- END RESULTS -->
+
+
 
       <!-- GUIA DE CIERRE GALICIA -->
       <div class="guia-panel" id="guiaPanel">
@@ -510,29 +504,83 @@
             <label class="form-label" for="manualCuotas">Cuotas</label>
             <select id="manualCuotas" class="form-input form-select">
               <option value="1">1 Pago</option>
+              <option value="2">2 Pagos</option>
               <option value="3">3 Pagos</option>
+              <option value="4">4 Pagos</option>
+              <option value="5">5 Pagos</option>
               <option value="6">6 Pagos</option>
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="manualCapital">Monto Capital Acordado ($)</label>
+            <label class="form-label" for="manualCapital">
+              Monto Capital Acordado ($)
+              <span id="manualDescHint" class="manual-desc-hint"></span>
+            </label>
             <div class="input-prefix-wrap">
               <span class="input-prefix">$</span>
               <input type="number" id="manualCapital" class="form-input with-prefix" step="0.01" placeholder="Monto sin honorarios" />
             </div>
+            <span id="manualValidMsg" class="manual-valid-msg"></span>
           </div>
         </form>
 
+        <!-- ANTICIPO + CUOTAS IRREGULARES -->
+        <div class="anticipo-section">
+          <label class="anticipo-toggle-label">
+            <input type="checkbox" id="anticipoCheck" onchange="toggleAnticipo(); actualizarPreviewManual();" />
+            <span>Plan irregular (anticipo + cuotas del saldo)</span>
+          </label>
+          <div id="anticipoFields" style="display:none;" class="anticipo-fields">
+            <div class="form-group">
+              <label class="form-label" for="anticipoMonto">Anticipo ($)</label>
+              <div class="input-prefix-wrap">
+                <span class="input-prefix">$</span>
+                <input type="number" id="anticipoMonto" class="form-input with-prefix"
+                       step="0.01" placeholder="0.00" oninput="actualizarPreviewManual()" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="anticipoCuotas">Cuotas del saldo restante</label>
+              <select id="anticipoCuotas" class="form-input form-select" onchange="actualizarPreviewManual()">
+                <option value="1">1 cuota</option>
+                <option value="2">2 cuotas</option>
+              </select>
+            </div>
+            <div class="anticipo-preview">
+              <span id="anticipoResumen" class="anticipo-resumen"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- PRODUCTOS DEL ACUERDO (manual) -->
+        <div class="productos-section" style="margin-bottom: 16px;">
+          <div class="productos-header">
+            <span class="productos-title">📋 Productos incluidos en el acuerdo</span>
+            <button class="btn-add-producto" onclick="agregarProductoManual()" type="button">+ Agregar producto</button>
+          </div>
+          <div id="productosListManual" class="productos-list"></div>
+          <div class="producto-fijo">
+            <span class="producto-fijo-icon">🏢</span>
+            <span class="producto-fijo-label">Honorarios de Gestión Extrajudicial — Estudio CO-RE</span>
+            <span class="producto-fijo-tag">siempre incluido</span>
+          </div>
+        </div>
+
         <div class="manual-preview-card" id="manualPreview">
           <div class="preview-item">
-            <span>Honorarios (HAD 20% + IVA):</span>
-            <strong id="previewHad">$ 0,00</strong>
+            <span>Base con honorarios (×1,242):</span>
+            <strong id="previewBase">$ 0,00</strong>
+          </div>
+          <div class="preview-item">
+            <span>Descuento efectivo:</span>
+            <strong id="previewDesc">— %</strong>
           </div>
           <div class="preview-item total">
-            <span>TOTAL A PAGAR:</span>
+            <span>TOTAL A PAGAR (capital + hon.):</span>
             <strong id="previewTotal">$ 0,00</strong>
           </div>
-          <button type="button" class="btn btn-primary" onclick="generarPdfManual()" style="margin-top: 1rem; width: 100%;">
+          <div id="previewAlerta" class="preview-alerta" style="display:none;"></div>
+          <button type="button" class="btn btn-primary" id="btnGenerarManual" onclick="generarPdfManual()" style="margin-top: 1rem; width: 100%;">
             Generar PDF Manual
           </button>
         </div>

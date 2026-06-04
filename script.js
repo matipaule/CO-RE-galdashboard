@@ -63,7 +63,7 @@ const formatARS = (numero) =>
    ───────────────────────────────────────────────────────────────── */
 const PLANES = {
   1: { cuotas: 1, descuento: 0.70, label: "1 Pago (Contado)" },
-  2: { cuotas: 2, descuento: 0.70, label: "2 Pagos" },
+  2: { cuotas: 2, descuento: 0.65, label: "2 Pagos" },
   3: { cuotas: 3, descuento: 0.65, label: "3 Pagos" },
   4: { cuotas: 4, descuento: 0.65, label: "4 Pagos" },
   5: { cuotas: 5, descuento: 0.65, label: "5 Pagos" },
@@ -98,7 +98,7 @@ let estadoActual = {
   dni:     "",
   nombre:  "",
   deuda:   0,
-  grupo:   "CO",
+  grupo:   "CO",   // campo interno, sin UI
   resultados: {},   // { 1: {...}, 3: {...}, 6: {...} }
 };
 
@@ -163,12 +163,98 @@ function getOrCreateOverlay() {
   return overlay;
 }
 
+// Límites de descuento por cuotas (igual que calculadora principal)
+const LIMITES_MANUAL = { 1:0.70, 2:0.65, 3:0.65, 4:0.65, 5:0.65, 6:0.60 };
+
 function actualizarPreviewManual() {
-  const capital = parseFloat(document.getElementById("manualCapital").value) || 0;
-  const had = calcularHAD(capital);
-  const total = capital + had;
-  document.getElementById("previewHad").textContent = formatARS(had);
-  document.getElementById("previewTotal").textContent = formatARS(total);
+  const deuda    = parseFloat(document.getElementById("manualDeuda")?.value)   || 0;
+  const capital  = parseFloat(document.getElementById("manualCapital")?.value) || 0;
+  const cuotas   = parseInt(document.getElementById("manualCuotas")?.value, 10) || 1;
+
+  const base     = deuda * 1.242;
+  const total    = capital * 1.242;
+  const descPct  = base > 0 ? (1 - total / base) : 0;
+  const maxDesc  = LIMITES_MANUAL[cuotas] ?? 0.65;
+  const maxBase  = base * (1 - maxDesc);
+
+  const hint = document.getElementById("manualDescHint");
+  if (hint && deuda > 0)
+    hint.textContent = `máx. ${Math.round(maxDesc*100)}% de quita → mín. ${formatARS(maxBase/1.242)} capital`;
+
+  const baseEl  = document.getElementById("previewBase");
+  const descEl  = document.getElementById("previewDesc");
+  const totalEl = document.getElementById("previewTotal");
+  if (baseEl)  baseEl.textContent  = formatARS(base);
+  if (totalEl) totalEl.textContent = formatARS(total);
+  if (descEl)  descEl.textContent  = base > 0 && capital > 0 ? `${Math.round(descPct*100)}% OFF` : "— %";
+
+  const alerta = document.getElementById("previewAlerta");
+  const btn    = document.getElementById("btnGenerarManual");
+  const msg    = document.getElementById("manualValidMsg");
+
+  let error = "";
+  if (base > 0 && capital > 0) {
+    if (total > base + 0.01) error = "⚠️ El monto acordado supera la deuda con honorarios.";
+    else if (descPct > maxDesc + 0.001)
+      error = `⚠️ Quita de ${Math.round(descPct*100)}% supera el límite de ${Math.round(maxDesc*100)}% para ${cuotas} cuota/s.`;
+  }
+  if (alerta) { alerta.textContent = error; alerta.style.display = error ? "block" : "none"; }
+  if (msg)    { msg.textContent = error; msg.className = error ? "manual-valid-msg error" : "manual-valid-msg ok"; }
+  if (btn)    btn.disabled = Boolean(error) && base > 0 && capital > 0;
+
+  // Resumen anticipo
+  if (esAnticipo() && capital > 0) {
+    const d = getDatosAnticipo(total);
+    const res = document.getElementById("anticipoResumen");
+    if (res) {
+      if (d.anticipo <= 0) { res.textContent = "Ingresá el monto del anticipo."; res.className = "anticipo-resumen warn"; }
+      else if (d.anticipo >= total) { res.textContent = "⚠️ El anticipo no puede ser igual o mayor al total."; res.className = "anticipo-resumen error"; }
+      else { res.textContent = `Anticipo: ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}`; res.className = "anticipo-resumen ok"; }
+    }
+  }
+}
+
+function toggleAnticipo() {
+  const on = document.getElementById("anticipoCheck")?.checked;
+  const fields = document.getElementById("anticipoFields");
+  if (fields) fields.style.display = on ? "grid" : "none";
+  actualizarPreviewManual();
+}
+
+function esAnticipo() { return document.getElementById("anticipoCheck")?.checked || false; }
+
+function getDatosAnticipo(totalConHon) {
+  const anticipo   = parseFloat(document.getElementById("anticipoMonto")?.value) || 0;
+  const nCuotas    = parseInt(document.getElementById("anticipoCuotas")?.value, 10) || 1;
+  const saldo      = totalConHon - anticipo;
+  const cuotaValor = saldo > 0 ? saldo / nCuotas : 0;
+  return { anticipo, nCuotas, saldo, cuotaValor };
+}
+
+function agregarProductoManual(tipo = "", numero = "") {
+  const lista = document.getElementById("productosListManual");
+  if (!lista) return;
+  const id = ++_productoId;
+  const opciones = TIPOS_PRODUCTO.map(t => `<option value="${t}" ${t===tipo?"selected":""}>${t}</option>`).join("");
+  const fila = document.createElement("div");
+  fila.className = "producto-row"; fila.dataset.id = id;
+  fila.innerHTML = `
+    <select class="producto-tipo form-input form-select">${opciones}</select>
+    <input  class="producto-numero form-input" type="text" placeholder="N° / Referencia" value="${numero}" />
+    <button class="btn-del-producto" onclick="eliminarProducto(${id})" title="Eliminar">✕</button>`;
+  lista.appendChild(fila);
+}
+
+function obtenerProductosManuales() {
+  const filas = document.querySelectorAll("#productosListManual .producto-row");
+  const productos = [];
+  filas.forEach(f => {
+    const tipo   = f.querySelector(".producto-tipo")?.value?.trim()   || "";
+    const numero = f.querySelector(".producto-numero")?.value?.trim() || "";
+    if (tipo) productos.push({ tipo, numero });
+  });
+  productos.push({ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" });
+  return productos;
 }
 
 function generarPdfManual() {
@@ -205,13 +291,33 @@ function generarPdfManual() {
     return;
   }
 
+  // Validar límite descuento
+  const base    = deuda * 1.242;
+  const total   = capital * 1.242;
+  const descPct = base > 0 ? (1 - total / base) : 0;
+  const maxDesc = LIMITES_MANUAL[cuotas] ?? 0.65;
+  if (descPct > maxDesc + 0.001) {
+    alert(`⚠️ La quita efectiva es ${Math.round(descPct*100)}%, supera el límite de ${Math.round(maxDesc*100)}% para ${cuotas} cuota/s.`);
+    return;
+  }
+
+  let anticipoData = null;
+  if (esAnticipo()) {
+    const d = getDatosAnticipo(total);
+    if (d.anticipo <= 0 || d.anticipo >= total) {
+      alert("⚠️ El anticipo debe ser mayor a $0 y menor al total con honorarios.");
+      return;
+    }
+    anticipoData = d;
+  }
+
   generateAgreementPDF({
-    nombre,
-    dni,
-    producto,
+    nombre, dni, producto,
     deudaOriginal: deuda,
     cuotas,
     capitalAcordado: capital,
+    productos: obtenerProductosManuales(),
+    anticipo: anticipoData,
   });
 }
 
@@ -319,6 +425,154 @@ function calcularPlan(deudaTotalOriginal, cuotas, porcentajeDescuento) {
 }
 
 /* ─────────────────────────────────────────────────────────────────
+   CALCULADORA INVERSA — MODO "POR MONTO DEL CLIENTE"
+   ───────────────────────────────────────────────────────────────── */
+let _modoCalculo = 'descuento'; // 'descuento' | 'inverso'
+
+function switchModoCalculo(modo) {
+  _modoCalculo = modo;
+
+  // Toggle campo monto cliente
+  const fieldMonto = document.getElementById('fieldMontoCliente');
+  const btnToggle  = document.getElementById('btnMontoClienteToggle');
+  if (fieldMonto) fieldMonto.style.display = modo === 'inverso' ? 'block' : 'none';
+  if (btnToggle)  btnToggle.style.display  = modo === 'inverso' ? 'none'  : '';
+
+  // Ocultar resultados anteriores
+  const rg = document.getElementById('resultsGrid');
+  const gi = document.getElementById('gridInversoWrap');
+  if (rg) rg.style.display = 'none';
+  if (gi) gi.style.display = 'none';
+
+  actualizarLivePreview();
+}
+
+function calcularAuto() {
+  if (_modoCalculo === 'inverso') calcularInverso();
+  // En modo descuento, el cálculo se dispara desde la tabla (usarFilaEscenario)
+}
+
+function actualizarLabelMontoCliente() {
+  const tipo  = document.querySelector('input[name="montoTipo"]:checked')?.value || 'cuota';
+  const hint  = document.getElementById('montoClienteHint');
+  if (hint) hint.textContent = tipo === 'cuota'
+    ? 'El sistema buscará el descuento para cada número de cuotas'
+    : 'El sistema calculará el descuento para ese total fijo';
+}
+
+function calcularInverso() {
+  const rawDeuda   = document.getElementById('inputDeuda').value.trim();
+  const rawMonto   = document.getElementById('inputMontoCliente').value.trim();
+  const tipo       = document.querySelector('input[name="montoTipo"]:checked')?.value || 'cuota';
+  const dni        = document.getElementById('inputDni').value.trim();
+  const nombre     = document.getElementById('inputNombre').value.trim();
+  const grupo      = "CO";
+
+  if (!rawDeuda) {
+    alert('⚠️ El campo "Saldo Deuda Total" es obligatorio.');
+    document.getElementById('inputDeuda').focus();
+    return;
+  }
+  if (!rawMonto) {
+    alert('⚠️ Ingresá el monto que el cliente puede pagar.');
+    document.getElementById('inputMontoCliente').focus();
+    return;
+  }
+
+  const deuda      = parsearNumero(rawDeuda);
+  const montoInput = parsearNumero(rawMonto);
+
+  if (isNaN(deuda) || deuda <= 0) {
+    alert('⚠️ Deuda inválida.');
+    return;
+  }
+  if (isNaN(montoInput) || montoInput <= 0) {
+    alert('⚠️ Monto del cliente inválido.');
+    return;
+  }
+
+  const base   = deuda * 1.242;
+  const limites = { 1:0.70, 2:0.65, 3:0.65, 4:0.65, 5:0.65, 6:0.60 };
+  const resultados = [];
+
+  estadoActual = { dni, nombre, deuda, grupo, descuentoBase: null, productos: obtenerProductos(), resultados: {} };
+
+  [1, 2, 3, 4, 5, 6].forEach((c) => {
+    const totalCliente = tipo === 'cuota' ? montoInput * c : montoInput;
+    const cuotaValor   = totalCliente / c;
+    const descuento    = 1 - totalCliente / base;
+    const limite       = limites[c];
+
+    let estado, clase;
+    if (totalCliente > base + 0.01) {
+      estado = '❌ Supera deuda';
+      clase  = 'inv-imposible';
+    } else if (descuento < 0) {
+      estado = '❌ Supera deuda';
+      clase  = 'inv-imposible';
+    } else if (descuento > limite + 0.001) {
+      const exceso = Math.round((descuento - limite) * 100);
+      estado = `⚠️ ${exceso}pt sobre límite`;
+      clase  = 'inv-borde';
+    } else {
+      estado = '✅ Viable';
+      clase  = 'inv-viable';
+    }
+
+    // Calcular con el descuento real (o capado al límite si excede)
+    const descUsado = Math.min(Math.max(descuento, 0), limite);
+    const calculo   = calcularPlan(deuda, c, descUsado);
+    estadoActual.resultados[c] = { ...PLANES[c], ...calculo };
+
+    resultados.push({ c, totalCliente, cuotaValor, descuento, clase, estado, viable: clase === 'inv-viable' });
+  });
+
+  // Subtitle
+  const tipoLabel = tipo === 'cuota' ? `${formatARS(montoInput)} / cuota` : `${formatARS(montoInput)} total`;
+  document.getElementById('gridInversoSubtitle').textContent =
+    `Deuda: ${formatARS(deuda)} · El cliente puede pagar: ${tipoLabel}`;
+
+  renderizarGridInverso(resultados);
+}
+
+function renderizarGridInverso(resultados) {
+  const tbody = document.getElementById('gridInversoBody');
+  tbody.innerHTML = '';
+
+  resultados.forEach(({ c, totalCliente, cuotaValor, descuento, clase, estado }) => {
+    const pct = descuento < 0 ? '—' : `${Math.round(descuento * 100)}%`;
+    const totalFmt = descuento < 0 ? '—' : formatARS(totalCliente);
+    const cuotaFmt = descuento < 0 ? '—' : formatARS(cuotaValor);
+    const label    = c === 1 ? '1 Pago (Contado)' : `${c} Pagos`;
+    const acciones = clase !== 'inv-imposible'
+      ? `<button class="btn-int btn-int-wa"  onclick="copiarWhatsApp(${c})" title="WhatsApp">💬</button>
+         <button class="btn-int btn-int-pdf" onclick="generarPDF(${c})"     title="PDF">📄</button>`
+      : '—';
+
+    const tr = document.createElement('tr');
+    tr.className = clase;
+    tr.innerHTML = `
+      <td><strong>${label}</strong></td>
+      <td class="mono">${totalFmt}</td>
+      <td class="mono">${cuotaFmt}</td>
+      <td><span class="inv-pct">${pct} OFF</span></td>
+      <td><span class="inv-estado ${clase}">${estado}</span></td>
+      <td class="inv-actions">${acciones}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('gridInversoWrap').style.display = 'none';
+  document.getElementById('resultsGrid').style.display     = 'none';
+  // Show tabla de escenarios with reference highlighted
+  renderizarTablaEscenarios(deuda, montoInput, tipo);
+
+  setTimeout(() => {
+    document.getElementById('gridInversoWrap')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
+}
+
+/* ─────────────────────────────────────────────────────────────────
    FUNCIÓN PRINCIPAL: CALCULAR PROPUESTAS
    ───────────────────────────────────────────────────────────────── */
 function calcularPropuestas() {
@@ -326,7 +580,7 @@ function calcularPropuestas() {
   const nombre      = document.getElementById("inputNombre").value.trim();
   const rawDeuda    = document.getElementById("inputDeuda").value.trim();
   const rawDescuento = document.getElementById("inputDescuento").value.trim();
-  const grupo       = document.getElementById("inputGrupo").value;
+  const grupo       = "CO";
 
   if (!rawDeuda) {
     alert('⚠️ El campo "Saldo Deuda Total" es obligatorio.');
@@ -349,7 +603,7 @@ function calcularPropuestas() {
 
   estadoActual = { dni, nombre, deuda, grupo, descuentoBase, productos: obtenerProductos(), resultados: {} };
 
-  const limites = { 1: 0.70, 2: 0.70, 3: 0.65, 4: 0.65, 5: 0.65, 6: 0.60 };
+  const limites = { 1: 0.70, 2: 0.65, 3: 0.65, 4: 0.65, 5: 0.65, 6: 0.60 };
   let alertas = [];
 
   [1, 2, 3, 4, 5, 6].forEach((c) => {
@@ -372,6 +626,506 @@ function calcularPropuestas() {
   }
 
   renderizarResultados();
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   TABLA DE ESCENARIOS
+   ───────────────────────────────────────────────────────────────── */
+// Niveles de quita a mostrar en la tabla (de mayor a menor beneficio)
+const QUITA_NIVELES = [70, 65, 60, 55, 50, 45, 40, 35, 30, 20, 10, 0];
+// Límites por cuota (igual que el resto del sistema)
+const LIMITES_TABLA = { 1:70, 2:65, 3:65, 4:65, 5:65, 6:60 };
+// Planes a mostrar como columnas
+const CUOTAS_TABLA  = [1, 2, 3, 4, 5, 6];
+
+function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
+  const wrap = document.getElementById('tablaEscenariosWrap');
+  if (!wrap) return;
+
+  if (!deuda || deuda <= 0) { wrap.style.display = 'none'; return; }
+
+  const base = deuda * 1.242;
+
+  // ── Encabezado ──────────────────────────────────────────────────
+  const thead = document.getElementById('tablaEscenariosHead');
+  thead.innerHTML = `<tr>
+    <th class="esc-th-quita">% Quita</th>
+    ${CUOTAS_TABLA.map(c => `<th>${c === 1 ? '1 Pago' : c + ' Pagos'}</th>`).join('')}
+  </tr>`;
+
+  // ── Calcular referencia del cliente ─────────────────────────────
+  // Para cada fila: ¿cuál celda coincide con lo que el cliente puede pagar?
+  let refFilaQuita = null;
+  if (refMonto && refMonto > 0 && refTipo) {
+    // Buscar la fila cuya celda más se acerca al monto de referencia
+    // No resaltamos una celda sino la FILA cuya quita% produce el importe más cercano al ref
+    // Para el tipo 'cuota': buscamos la fila donde alguna celda ≈ refMonto
+    // Para el tipo 'total': buscamos fila donde total ≈ refMonto
+  }
+
+  // ── Cuerpo ──────────────────────────────────────────────────────
+  const tbody = document.getElementById('tablaEscenariosBody');
+  tbody.innerHTML = '';
+
+  // Guardar la quita% de cada fila para el click
+  QUITA_NIVELES.forEach((quita) => {
+    const total       = base * (1 - quita / 100);
+    const tr          = document.createElement('tr');
+    tr.dataset.quita  = quita;
+
+    // Columna quita%
+    const tdQ = document.createElement('td');
+    tdQ.className  = 'esc-td-quita';
+    tdQ.innerHTML  = `<strong>${quita}%</strong>`;
+    tr.appendChild(tdQ);
+
+    let filaResaltada = false;
+
+    CUOTAS_TABLA.forEach((c) => {
+      const limite     = LIMITES_TABLA[c];
+      const permitido  = quita <= limite;
+      const importeCuota = permitido ? Math.ceil(total / c) : null;
+
+      const td = document.createElement('td');
+
+      if (!permitido) {
+        td.className  = 'esc-td-nopermitido';
+        td.textContent = '—';
+      } else {
+        const cellKey  = `${quita}_${c}`;
+        const selected = _escSeleccion.has(cellKey);
+        td.className   = 'esc-td-ok' + (selected ? ' esc-td-selected' : '');
+        td.innerHTML   = `${formatARS(importeCuota)}<span class="esc-check">${selected ? '✓' : ''}</span>`;
+        td.title       = `${quita}% quita · ${c === 1 ? '1 Pago' : c + ' Pagos'} · ${formatARS(importeCuota)}/cuota — Click para seleccionar`;
+        td.style.cursor = 'pointer';
+
+        // Resaltar si coincide con la referencia del cliente
+        if (refMonto && refMonto > 0) {
+          let match = false;
+          if (refTipo === 'cuota') match = Math.abs(importeCuota - refMonto) / refMonto < 0.05;
+          else if (refTipo === 'total') match = Math.abs(total - refMonto) / refMonto < 0.05;
+          if (match) { td.classList.add('esc-td-match'); filaResaltada = true; }
+        }
+
+        // Click → toggle selección
+        td.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleCeldaEscenario(quita, c, importeCuota, total);
+        });
+      }
+      tr.appendChild(td);
+    });
+
+    if (filaResaltada) tr.classList.add('esc-row-match');
+
+    // Click en fila (columna quita) → calcula ese % directamente
+    const tdQuita = tr.querySelector('.esc-td-quita');
+    if (tdQuita) {
+      tdQuita.style.cursor = 'pointer';
+      tdQuita.title = `Click para calcular con ${quita}% de quita`;
+      tdQuita.addEventListener('click', () => usarFilaEscenario(quita));
+    }
+
+    tbody.appendChild(tr);
+  });
+
+  // Referencia label
+  const refRow   = document.getElementById('tablaEscRefRow');
+  const refLabel = document.getElementById('tablaEscRefLabel');
+  if (refMonto && refMonto > 0 && refTipo) {
+    const desc = refTipo === 'cuota'
+      ? `Referencia del cliente: ${formatARS(refMonto)} / cuota`
+      : `Referencia del cliente: ${formatARS(refMonto)} total`;
+    refLabel.textContent    = `🎯 ${desc} — filas y celdas resaltadas son las más cercanas`;
+    refRow.style.display    = 'flex';
+  } else {
+    refRow.style.display    = 'none';
+  }
+
+  wrap.style.display = 'block';
+}
+
+/* ─── SELECCIÓN MÚLTIPLE DE CELDAS ─────────────────────────────── */
+// Mapa: "quita_cuotas" → { quita, cuotas, importeCuota, totalPaga }
+const _escSeleccion = new Map();
+
+function toggleCeldaEscenario(quita, cuotas, importeCuota, totalPaga) {
+  const key = `${quita}_${cuotas}`;
+
+  // ── Deseleccionar ─────────────────────────────────────────────────
+  if (_escSeleccion.has(key)) {
+    _escSeleccion.delete(key);
+    actualizarPanelSeleccion();
+    const deuda = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+    if (!isNaN(deuda) && deuda > 0) renderizarTablaEscenarios(deuda);
+    return;
+  }
+
+  // ── Límite de 4 ───────────────────────────────────────────────────
+  if (_escSeleccion.size >= 4) {
+    mostrarToast("Máximo 4 alternativas por propuesta", "error");
+    return;
+  }
+
+  // ── Validación: no repetir el mismo número de cuotas ───────────────
+  for (const [, sel] of _escSeleccion) {
+    if (sel.cuotas === cuotas) {
+      const label = cuotas === 1 ? '1 Pago' : `${cuotas} Pagos`;
+      mostrarToast(
+        `⚠️ Ya hay una opción de ${label} seleccionada (${sel.quita}% de quita). Quitala primero antes de agregar otra del mismo plan.`,
+        "error"
+      );
+      return;
+    }
+  }
+
+  // ── Validación lógica: coherencia entre cuotas y total ────────────
+  const deuda = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  if (!isNaN(deuda) && deuda > 0) {
+    const base     = deuda * 1.242;
+    const totalNew = base * (1 - quita / 100);
+
+    for (const [, sel] of _escSeleccion) {
+      const totalSel = base * (1 - sel.quita / 100);
+
+      // Caso: nueva tiene MÁS cuotas pero paga MENOS o IGUAL que una existente
+      if (cuotas > sel.cuotas && totalNew <= totalSel) {
+        if (Math.abs(totalNew - totalSel) < 0.01) {
+          // Exactamente igual
+          const ok = confirm(
+            `⚠️ Con ${cuotas} cuotas el cliente pagaría lo MISMO que con ${sel.cuotas} cuota/s (${formatARS(totalNew)}).
+
+Siempre va a elegir las ${cuotas} cuotas — el plan de ${sel.cuotas} no agrega valor.
+
+¿Querés agregarlo igual?`
+          );
+          if (!ok) return;
+        } else {
+          // Más cuotas, menos total — irracional para el cobrador
+          mostrarToast(
+            `❌ Con ${cuotas} cuotas el cliente pagaría MENOS (${formatARS(totalNew)}) que con ${sel.cuotas} cuota/s (${formatARS(totalSel)}). El cliente siempre elegiría las ${cuotas} cuotas.`,
+            "error"
+          );
+          return;
+        }
+      }
+
+      // Caso: nueva tiene MENOS cuotas pero paga MÁS o IGUAL que una existente
+      if (cuotas < sel.cuotas && totalNew >= totalSel) {
+        if (Math.abs(totalNew - totalSel) < 0.01) {
+          const ok = confirm(
+            `⚠️ Con ${cuotas} cuota/s el cliente pagaría lo MISMO que con ${sel.cuotas} cuotas (${formatARS(totalNew)}).
+
+Siempre va a preferir las ${sel.cuotas} cuotas — el plan de ${cuotas} no tiene sentido ofrecerlo.
+
+¿Querés agregarlo igual?`
+          );
+          if (!ok) return;
+        } else {
+          mostrarToast(
+            `❌ Con ${cuotas} cuota/s el cliente pagaría MÁS (${formatARS(totalNew)}) que con ${sel.cuotas} cuotas (${formatARS(totalSel)}). El cliente siempre elegiría las ${sel.cuotas} cuotas.`,
+            "error"
+          );
+          return;
+        }
+      }
+    }
+  }
+
+  // ── Todo OK, agregar ──────────────────────────────────────────────
+  _escSeleccion.set(key, { quita, cuotas, importeCuota, totalPaga });
+  actualizarPanelSeleccion();
+  if (!isNaN(deuda) && deuda > 0) renderizarTablaEscenarios(deuda);
+}
+
+function actualizarPanelSeleccion() {
+  const panel = document.getElementById('panelSeleccionEsc');
+  const badge = document.getElementById('seleccionBadge');
+  const lista = document.getElementById('seleccionLista');
+  if (!panel) return;
+
+  const n = _escSeleccion.size;
+  if (n === 0) { panel.style.display = 'none'; return; }
+
+  const deuda = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  badge.textContent = `${n} propuesta${n > 1 ? 's' : ''} seleccionada${n > 1 ? 's' : ''}`;
+
+  lista.innerHTML = '';
+
+  if (isNaN(deuda) || deuda <= 0) {
+    lista.innerHTML = '<p style="color:var(--text-muted);font-size:12px;padding:10px">Ingresá la deuda para ver las tarjetas.</p>';
+    panel.style.display = 'block';
+    return;
+  }
+
+  const base = deuda * 1.242;
+  const ordenadas = Array.from(_escSeleccion.values())
+    .sort((a, b) => b.quita - a.quita || a.cuotas - b.cuotas);
+
+  // Grid de cards
+  const grid = document.createElement('div');
+  grid.className = 'seleccion-cards-grid';
+
+  ordenadas.forEach(({ quita, cuotas }) => {
+    const plan    = calcularPlan(deuda, cuotas, quita / 100);
+    const label   = cuotas === 1 ? '1 Pago (Contado)' : `${cuotas} Pagos`;
+    const capB    = plan.montoRecuperar / 1.242;
+    const honA    = plan.montoRecuperar - capB;
+    const capXc   = capB / cuotas;
+    const honXc   = honA / cuotas;
+
+    const cuotaRow = cuotas > 1
+      ? `<div class="plan-detail-row">
+           <span>Valor de cuota</span>
+           <span class="detail-value accent">${formatARS(plan.valorCuota)} / cuota</span>
+         </div>` : '';
+
+    const desgloseLabel = cuotas > 1
+      ? `<span class="desglose-lbl banco-lbl">🏦 Banco (x cuota)</span>
+         <span class="desglose-val">${formatARS(capXc)}</span>
+         </div><div class="desglose-row">
+         <span class="desglose-lbl estudio-lbl">🏢 Honorarios (x cuota)</span>
+         <span class="desglose-val">${formatARS(honXc)}</span>`
+      : `<span class="desglose-lbl banco-lbl">🏦 Banco Galicia</span>
+         <span class="desglose-val">${formatARS(capB)}</span>
+         </div><div class="desglose-row">
+         <span class="desglose-lbl estudio-lbl">🏢 Honorarios</span>
+         <span class="desglose-val">${formatARS(honA)}</span>`;
+
+    const card = document.createElement('div');
+    card.className = 'result-card seleccion-card';
+    card.innerHTML = `
+      <div class="plan-header">
+        <div class="plan-badge">${cuotas === 1 ? 'Contado' : 'Cuotas'}</div>
+        <div class="plan-title">${label}</div>
+        <div class="plan-discount">${quita}% OFF</div>
+      </div>
+      <div class="plan-body">
+        <div class="calculo-chain">
+          <div class="chain-row">
+            <span class="chain-lbl">Deuda original</span>
+            <span class="chain-val">${formatARS(deuda)}</span>
+          </div>
+          <div class="chain-row chain-add">
+            <span class="chain-lbl">+ Honorarios (24,2%)</span>
+            <span class="chain-val">+ ${formatARS(base - deuda)}</span>
+          </div>
+          <div class="chain-row chain-base">
+            <span class="chain-lbl">Base de cálculo</span>
+            <span class="chain-val chain-val-base">${formatARS(base)}</span>
+          </div>
+          <div class="chain-row chain-quita">
+            <span class="chain-lbl">− Quita (${quita}%)</span>
+            <span class="chain-val chain-val-quita">- ${formatARS(plan.montoDescuento)}</span>
+          </div>
+        </div>
+        <div class="plan-main-amount">
+          <span class="amount-label">Total a pagar</span>
+          <span class="amount-value">${formatARS(plan.montoRecuperar)}</span>
+        </div>
+        ${cuotaRow}
+        <div class="desglose-cuentas">
+          <div class="desglose-row">${desgloseLabel}</div>
+        </div>
+      </div>
+      <div class="plan-actions">
+        <button class="btn-action btn-wa" onclick="copiarWASeleccion(${quita},${cuotas})">
+          <span>💬</span> WhatsApp
+        </button>
+        <button class="btn-action btn-pdf" onclick="generarPDFDesdeSeleccion(${quita},${cuotas})">
+          <span>📄</span> Generar PDF
+        </button>
+        <button class="btn-quitar-seleccion" onclick="toggleCeldaEscenario(${quita},${cuotas},0,0)" title="Quitar">✕</button>
+      </div>`;
+    grid.appendChild(card);
+  });
+
+  lista.appendChild(grid);
+
+  // Footer: botón combinado solo si hay 2+
+  const footer = document.getElementById('panelSelFooter');
+  if (footer) footer.style.display = _escSeleccion.size >= 2 ? 'block' : 'none';
+
+  panel.style.display = 'block';
+}
+
+function limpiarSeleccion() {
+  _escSeleccion.clear();
+  actualizarPanelSeleccion();
+  const deuda = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  if (!isNaN(deuda) && deuda > 0) renderizarTablaEscenarios(deuda);
+}
+
+function copiarPropuestaCombinada() {
+  if (_escSeleccion.size === 0) return;
+  const deuda   = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  const nombre  = document.getElementById('inputNombre')?.value?.trim() || '';
+  const dni     = document.getElementById('inputDni')?.value?.trim()    || '';
+  if (isNaN(deuda) || deuda <= 0) { alert('⚠️ Ingresá la deuda primero.'); return; }
+
+  const base           = deuda * 1.242;
+  const nombreDisplay  = nombre ? ` *${nombre}*` : '';
+  const dniDisplay     = dni    ? ` (DNI: ${dni})` : '';
+  const hoy = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+
+  const alternativas = Array.from(_escSeleccion.values())
+    .sort((a, b) => b.quita - a.quita || a.cuotas - b.cuotas);
+
+  // Productos del acuerdo
+  const productosWA = obtenerProductos();
+  const productosTexto = productosWA
+    .map((p, i) => {
+      const num = p.numero && p.numero !== 'Estudio CO-RE' ? `  N° ${p.numero}` : (p.numero ? `  — ${p.numero}` : '');
+      return `${String(i+1).padStart(2,'0')}. ${p.tipo}${num}`;
+    }).join('\n');
+
+  const bloques = alternativas.map(({ quita, cuotas, importeCuota }, i) => {
+    const total     = Math.ceil(base * (1 - quita / 100));
+    const capBanco  = total / 1.242;
+    const honAgenc  = total - capBanco;
+    const label     = cuotas === 1 ? '1 Pago (Contado)' : `${cuotas} Pagos`;
+    const cuotaLine = cuotas === 1
+      ? `💰 *Monto único:* ${formatARS(total)}`
+      : `💰 *Total a regularizar:* ${formatARS(total)}\n   📅 *Cuotas:* ${cuotas} × ${formatARS(Math.ceil(total / cuotas))}`;
+    const pagoLinea = cuotas === 1
+      ? `   → Banco (GALICIALEG):       ${formatARS(capBanco)}\n   → Honorarios (GALICIAHONORARIOS): ${formatARS(honAgenc)}`
+      : `   → Banco (GALICIALEG):       ${formatARS(capBanco / cuotas)}/cuota\n   → Honorarios (GALICIAHONORARIOS): ${formatARS(honAgenc / cuotas)}/cuota`;
+    return `✅ *ALTERNATIVA ${i + 1} — ${label}*\n🏷️ Quita: *${quita}%*\n${cuotaLine}\n${pagoLinea}`;
+  }).join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
+
+  const texto =
+`━━━━━━━━━━━━━━━━━━━━━━━━
+🏦 *BANCO GALICIA — Propuesta de Regularización*
+📋 Mora Tardía · Extrajudicial
+📆 Fecha: ${hoy}   Vence: ${calcularVencimiento48hs()}
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Estimado/a${nombreDisplay}${dniDisplay},
+
+Le presentamos *${alternativas.length} alternativas* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*.
+
+📊 *Deuda original:* ${formatARS(deuda)}
+📊 *Saldo con honorarios (base cálculo):* ${formatARS(base)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+📦 *PRODUCTOS INCLUIDOS EN EL ACUERDO*
+━━━━━━━━━━━━━━━━━━━━━━━━
+${productosTexto}
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+${bloques}
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+🏧 *DATOS DE PAGO*
+
+Honorarios de Gestión Extrajudicial 20%+IVA — Estudio CO-RE
+   → Pago al Banco  Alias: GALICIALEG  |  CBU: 0070686120000002247308
+   → Pago de Honorarios  Alias: GALICIAHONORARIOS  |  CBU: 0070999030004062897261
+
+_Las cuentas se encuentran a nombre de *Maria Valeria Fandiño* CUIT 27-20481581-5, única facultada por el Banco Galicia para recibir el pago por su cuenta y orden. Verifique en su sucursal._
+
+⚠️ Propuesta válida 48 horas hábiles. Los pagos deben enviarse a los CBU informados.
+_Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364_
+━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+  copiarTexto(texto);
+  mostrarToast(`💬 Propuesta combinada (${alternativas.length} alternativas) copiada`, 'success');
+}
+
+function generarPDFDesdeSeleccion(quita, cuotas) {
+  const nombre = document.getElementById('inputNombre')?.value?.trim() || '';
+  const dni    = document.getElementById('inputDni')?.value?.trim()    || '';
+  const deuda  = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  if (!nombre) { alert('⚠️ Completá Nombre y Apellido.'); return; }
+  if (!dni)    { alert('⚠️ Completá DNI.'); return; }
+  if (isNaN(deuda) || deuda <= 0) { alert('⚠️ Ingresá la deuda primero.'); return; }
+
+  const plan = calcularPlan(deuda, cuotas, quita / 100);
+  const planData = {
+    ...PLANES[cuotas] || { label: `${cuotas} Pagos`, cuotas },
+    ...plan,
+    porcentaje: quita,
+  };
+
+  // Temporarily set estadoActual for PDF generation
+  const backup = { ...estadoActual };
+  estadoActual.nombre = nombre;
+  estadoActual.dni    = dni;
+  estadoActual.deuda  = deuda;
+  estadoActual.resultados = estadoActual.resultados || {};
+  estadoActual.resultados[cuotas] = planData;
+  estadoActual.productos = obtenerProductos();
+
+  generateAgreementPDF(cuotas, planData);
+
+  // Restore (products may have changed)
+  estadoActual.nombre = backup.nombre || nombre;
+  estadoActual.dni    = backup.dni    || dni;
+}
+
+function copiarWASeleccion(quita, cuotas) {
+  const nombre = document.getElementById('inputNombre')?.value?.trim() || '';
+  const dni    = document.getElementById('inputDni')?.value?.trim()    || '';
+  const deuda  = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  if (isNaN(deuda) || deuda <= 0) { alert('⚠️ Ingresá la deuda primero.'); return; }
+
+  const plan = calcularPlan(deuda, cuotas, quita / 100);
+  const backup = { ...estadoActual };
+  estadoActual.nombre  = nombre;
+  estadoActual.dni     = dni;
+  estadoActual.deuda   = deuda;
+  estadoActual.resultados = estadoActual.resultados || {};
+  estadoActual.resultados[cuotas] = {
+    ...PLANES[cuotas] || { label: `${cuotas} Pagos`, cuotas },
+    ...plan, porcentaje: quita,
+  };
+
+  const texto = generarTextoWhatsApp(cuotas);
+  copiarTexto(texto);
+  mostrarToast('💬 WhatsApp copiado', 'success');
+
+  estadoActual.nombre = backup.nombre || nombre;
+  estadoActual.dni    = backup.dni    || dni;
+}
+
+function usarFilaEscenario(quitaPct) {
+  // Setea el % en el campo y cambia a modo descuento
+  switchModoCalculo('descuento');
+  const inputDesc = document.getElementById('inputDescuento');
+  if (inputDesc) {
+    inputDesc.value = quitaPct;
+    actualizarLivePreview();
+  }
+  calcularPropuestas();
+  // Scroll a los resultados
+  setTimeout(() => {
+    document.getElementById('resultsGrid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 150);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   PREVIEW LIVE DE CÁLCULO EN EL FORMULARIO
+   ───────────────────────────────────────────────────────────────── */
+function actualizarLivePreview() {
+  const rawDeuda = document.getElementById("inputDeuda")?.value?.trim() || "";
+  const deuda    = parsearNumero(rawDeuda);
+
+  // Campo base readonly en el formulario
+  const inputBase = document.getElementById("inputBase");
+  if (inputBase) {
+    inputBase.value = (!isNaN(deuda) && deuda > 0)
+      ? new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(deuda * 1.242)
+      : "";
+  }
+
+  // Tabla de escenarios: aparece apenas hay deuda
+  if (!isNaN(deuda) && deuda > 0) {
+    renderizarTablaEscenarios(deuda);
+  } else {
+    const wrap = document.getElementById("tablaEscenariosWrap");
+    if (wrap) wrap.style.display = "none";
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -443,8 +1197,6 @@ function renderizarResultados() {
   document.getElementById("monto1").textContent           = formatARS(r[1].montoRecuperar);
   document.getElementById("capitalBancoCard1").textContent = formatARS(s1.cap);
   document.getElementById("honAgenCard1").textContent     = formatARS(s1.hon);
-  document.getElementById("hab1").textContent             = formatARS(r[1].hab);
-  document.getElementById("had1").textContent             = formatARS(r[1].had);
   document.getElementById("descuentoDisplay1").textContent = `${r[1].porcentaje}% OFF`;
 
   // ── Plan 3 ──
@@ -458,8 +1210,6 @@ function renderizarResultados() {
   document.getElementById("cuota3").textContent           = `${formatARS(r[3].valorCuota)} / cuota`;
   document.getElementById("capitalBancoCard3").textContent = `${formatARS(s3.capXcuota)} / cuota`;
   document.getElementById("honAgenCard3").textContent     = `${formatARS(s3.honXcuota)} / cuota`;
-  document.getElementById("hab3").textContent             = formatARS(r[3].hab);
-  document.getElementById("had3").textContent             = formatARS(r[3].had);
   document.getElementById("descuentoDisplay3").textContent = `${r[3].porcentaje}% OFF`;
 
   // ── Plan 6 ──
@@ -473,8 +1223,6 @@ function renderizarResultados() {
   document.getElementById("cuota6").textContent           = `${formatARS(r[6].valorCuota)} / cuota`;
   document.getElementById("capitalBancoCard6").textContent = `${formatARS(s6.capXcuota)} / cuota`;
   document.getElementById("honAgenCard6").textContent     = `${formatARS(s6.honXcuota)} / cuota`;
-  document.getElementById("hab6").textContent             = formatARS(r[6].hab);
-  document.getElementById("had6").textContent             = formatARS(r[6].had);
   document.getElementById("descuentoDisplay6").textContent = `${r[6].porcentaje}% OFF`;
 
   const card1 = document.getElementById("card1");
@@ -536,59 +1284,13 @@ function renderizarResultados() {
     document.getElementById("urgenciaBanner")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, 100);
 
-  renderizarIntermedias();
 }
 
 /* ─────────────────────────────────────────────────────────────────
    CUOTAS INTERMEDIAS — RENDER Y TOGGLE
    ───────────────────────────────────────────────────────────────── */
-function renderizarIntermedias() {
-  const r = estadoActual.resultados;
-  const tbody = document.getElementById("tablaIntermedias");
-  const panel = document.getElementById("intermediasPanel");
-  if (!tbody || !panel) return;
 
-  tbody.innerHTML = "";
-  [2, 4, 5].forEach((c) => {
-    const plan = r[c];
-    if (!plan) return;
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><strong>${c} Pagos</strong></td>
-      <td><span class="intermedias-badge">${plan.porcentaje}% OFF</span></td>
-      <td class="mono">${formatARS(plan.deudaConHonorarios)}<span class="intermedias-sub"></span></td>
-      <td class="mono">${formatARS(plan.valorCuota)}<span class="intermedias-sub"> / cuota</span></td>
-      <td class="mono">${formatARS(plan.montoRecuperar)}</td>
-      <td>
-        <button class="btn-int btn-int-wa" onclick="copiarWhatsApp(${c})" title="Copiar WhatsApp">💬</button>
-        <button class="btn-int btn-int-pdf" onclick="generarPDF(${c})" title="Generar PDF">📄</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
 
-  // Reset panel to collapsed state each time results change
-  const body = document.getElementById("intermediasBody");
-  const btn   = document.getElementById("intermediasToggle");
-  if (body)  body.style.display  = "none";
-  if (btn)   btn.setAttribute("aria-expanded", "false");
-  if (btn)   btn.classList.remove("open");
-  panel.style.display = "block";
-}
-
-function toggleIntermedias() {
-  const body = document.getElementById("intermediasBody");
-  const btn   = document.getElementById("intermediasToggle");
-  if (!body) return;
-  const open = body.style.display === "block";
-  body.style.display = open ? "none" : "block";
-  btn.setAttribute("aria-expanded", String(!open));
-  btn.classList.toggle("open", !open);
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   CALCULAR FECHA VENCIMIENTO +48hs OPERATIVAS (L-V)
-   ───────────────────────────────────────────────────────────────── */
 function calcularVencimiento48hs() {
   const ahora = new Date();
   let horasRestantes = 48;
@@ -601,8 +1303,7 @@ function calcularVencimiento48hs() {
   }
 
   return cursor.toLocaleDateString("es-AR", {
-    weekday: "short", day: "2-digit", month: "2-digit",
-    hour: "2-digit", minute: "2-digit",
+    weekday: "short", day: "2-digit", month: "2-digit", year: "numeric",
   });
 }
 
@@ -704,29 +1405,17 @@ ${(estadoActual.productos || []).map((p, i) => {
    *Total a pagar:               ${formatARS(plan.montoRecuperar)}*
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-🏧 *DATOS DE PAGO OFICIALES*
-━━━━━━━━━━━━━━━━━━━━━━━━
+🏧 *DATOS DE PAGO*
 
-📌 *PAGO 1 — Capital de Deuda (Banco Galicia)*
-   💵 ${cuotas === 1 ? `Monto: ${formatARS(capitalBanco)}` : `Por cuota: ${formatARS(capitalPorCuota)}  |  Total: ${formatARS(capitalBanco)}`}
-   Alias: ${CUENTAS.recaudacion.alias}
-   CBU:  ${CUENTAS.recaudacion.cbu}
+Honorarios de Gestión Extrajudicial 20%+IVA — Estudio CO-RE
+   → Pago al Banco  Alias: GALICIALEG  |  CBU: 0070686120000002247308
+   → Pago de Honorarios  Alias: GALICIAHONORARIOS  |  CBU: 0070999030004062897261
 
-📌 *PAGO 2 — Honorarios (Estudio CO-RE)*
-   💵 ${cuotas === 1 ? `Monto: ${formatARS(honorariosAgencia)}` : `Por cuota: ${formatARS(honPorCuota)}  |  Total: ${formatARS(honorariosAgencia)}`}
-   Alias: ${CUENTAS.honorarios.alias}
-   CBU:  ${CUENTAS.honorarios.cbu}
+_Las cuentas se encuentran a nombre de *Maria Valeria Fandiño* CUIT 27-20481581-5, única facultada por el Banco Galicia para recibir el pago por su cuenta y orden. Verifique en su sucursal._
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ *CONDICIONES IMPORTANTES:*
-
-• El atraso en el pago *anula automáticamente la propuesta*.
-• Los pagos deben realizarse *exclusivamente* a los CBU informados.
-• La actualización en BCRA demora entre *60 y 90 días* desde el pago total.
-• Esta propuesta debe se confirmada *dentro de 48 horas* desde su emisión.
-• Deberea enviar comprobante de pago a nuestro WhatsApp para su validación.
-
-_Ante cualquier consulta, comuníquese con Estudio CO-RE, tel:0800-345-9707 o whatsapp:11-7058-1364._
+⚠️ Propuesta válida 48 horas hábiles. Los pagos deben enviarse a los CBU informados.
+_Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364_
 ━━━━━━━━━━━━━━━━━━━━━━━━`;
 
   return texto;
@@ -802,14 +1491,15 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     const plan = isManual
       ? {
           label: manualData.cuotas === 1 ? "Emisión Manual 1 Pago" : `Emisión Manual ${manualData.cuotas} Pagos`,
-          porcentaje: manualData.deudaOriginal > 0 ? Math.round((1 - manualData.capitalAcordado / manualData.deudaOriginal) * 100) : 0,
+          porcentaje: manualData.deudaOriginal > 0 ? Math.round((1 - (manualData.capitalAcordado * 1.242) / (manualData.deudaOriginal * 1.242)) * 100) : 0,
           hab: manualData.capitalAcordado * 0.16,
-          had: calcularHAD(manualData.capitalAcordado),
-          valorCuota: manualData.capitalAcordado / manualData.cuotas,
+          had: manualData.capitalAcordado * 0.242,
+          valorCuota: (manualData.capitalAcordado * 1.242) / manualData.cuotas,
         }
       : planOrData;
 
-    const cuotas = isManual ? parseInt(manualData.cuotas, 10) : cuotasOrData;
+    const cuotas     = isManual ? parseInt(manualData.cuotas, 10) : cuotasOrData;
+    const anticipoPDF = isManual ? (manualData.anticipo || null) : null;
     const deudaOriginal = isManual ? manualData.deudaOriginal : estadoActual.deuda;
     const montoFinal = isManual ? manualData.capitalAcordado : plan.montoRecuperar;
     const nombreDeudor = isManual ? manualData.nombre : estadoActual.nombre;
@@ -881,8 +1571,9 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // =================================================================
     // 3. BLOQUE PRODUCTOS INCLUIDOS EN EL ACUERDO
     // =================================================================
-    const productosRaw = isManual ? [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }]
-                               : (estadoActual.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }]);
+    const productosRaw = isManual
+      ? (manualData.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }])
+      : (estadoActual.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }]);
     // Límite de 5 productos para que el PDF entre en una página A4
     const productos = productosRaw.slice(0, 5);
     if (productosRaw.length > 5) {
@@ -932,7 +1623,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
 
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(M, y, W - M * 2, cuotas > 1 ? 57 : 50, 3, 3, "FD");
+    doc.roundedRect(M, y, W - M * 2, anticipoPDF ? 64 : (cuotas > 1 ? 57 : 50), 3, 3, "FD");
 
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
@@ -990,8 +1681,15 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.text("TOTAL A PAGAR:", col1, y + 43);
     doc.text(formatARS(montoFinal), col2, y + 43, { align: "right" });
 
-    // Detalle de cuotas (solo planes en cuotas)
-    if (cuotas > 1) {
+    // Detalle de cuotas / anticipo
+    if (anticipoPDF) {
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(15, 23, 42);
+      doc.setFontSize(8);
+      doc.text(`Anticipo: ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 51);
+      doc.text(`${anticipoPDF.nCuotas} cuota/s del saldo de ${formatARS(anticipoPDF.cuotaValor)} c/u`, col1, y + 57);
+      y += 65;
+    } else if (cuotas > 1) {
       doc.setFont("helvetica", "normal");
       doc.setTextColor(15, 23, 42);
       doc.setFontSize(8);
@@ -1164,11 +1862,17 @@ document.addEventListener("DOMContentLoaded", () => {
   initManualListeners();
 
   // Enter en el formulario lanza el cálculo
-  ["inputDni", "inputNombre", "inputDeuda", "inputGrupo"].forEach((id) => {
+  // Live preview listeners
+  document.getElementById("inputDeuda")?.addEventListener("input", actualizarLivePreview);
+
+  ["inputDni", "inputNombre", "inputDeuda"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
       el.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") calcularPropuestas();
+        if (e.key === "Enter") calcularAuto();
+        document.getElementById("inputMontoCliente")?.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") calcularAuto();
+        });
       });
     }
   });
