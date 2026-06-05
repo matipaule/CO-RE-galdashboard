@@ -2436,3 +2436,134 @@ body {
   transition: background 0.15s;
 }
 .btn-cerrar-monto:hover { background: rgba(148,163,184,0.08); }
+
+/* ─── CAMPO OPERADOR ─────────────────────────────────────────────── */
+.operador-field-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.operador-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.operador-input {
+  background: rgba(148,163,184,0.07);
+  border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text);
+  width: 140px;
+  transition: border-color 0.18s;
+}
+.operador-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(148,163,184,0.1);
+}
+.operador-input::placeholder { color: var(--text-muted); opacity: 0.6; }
+
+/* ─── POLÍTICA INTERNA — TABLA DE ESCENARIOS ────────────────────── */
+
+/* 🔒 Saldo bajo: quita bloqueada por política */
+.esc-td-policy-lock {
+  color: rgba(148,163,184,0.4) !important;
+  font-size: 13px;
+  cursor: default !important;
+}
+
+/* 🔴 Con quita: cuota < $400K = no rentable */
+.esc-td-no-rentable {
+  background: rgba(239,68,68,0.08) !important;
+  color: #f87171 !important;
+}
+.esc-td-no-rentable::after {
+  content: ' ●';
+  font-size: 8px;
+  color: #f87171;
+  vertical-align: super;
+}
+.esc-td-no-rentable:hover {
+  background: rgba(239,68,68,0.15) !important;
+}
+
+/* 🟡 Sin quita: cuota $150K–$250K = no recomendable */
+.esc-td-no-recomendable {
+  background: rgba(251,191,36,0.07) !important;
+  color: #fbbf24 !important;
+}
+.esc-td-no-recomendable::after {
+  content: ' ●';
+  font-size: 8px;
+  color: #fbbf24;
+  vertical-align: super;
+}
+.esc-td-no-recomendable:hover {
+  background: rgba(251,191,36,0.15) !important;
+}
+
+/* 🟢 Sin quita: cuota ≥ $250K = potable */
+.esc-td-potable {
+  background: rgba(74,222,128,0.06) !important;
+  color: #4ade80 !important;
+  font-weight: 600;
+}
+.esc-td-potable::after {
+  content: ' ●';
+  font-size: 8px;
+  color: #4ade80;
+  vertical-align: super;
+}
+.esc-td-potable:hover {
+  background: rgba(74,222,128,0.14) !important;
+}
+
+/* ─── DATE PICKER VENCIMIENTO ───────────────────────────────────── */
+.vencimiento-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 6px;
+  border-top: 1px solid rgba(148,163,184,0.1);
+  flex-wrap: wrap;
+}
+.vencimiento-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.vencimiento-input {
+  background: rgba(148,163,184,0.07);
+  border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.18s;
+}
+.vencimiento-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.vencimiento-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  flex: 1;
+}
+.btn-clear-venc {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.btn-clear-venc:hover { background: rgba(148,163,184,0.1); }

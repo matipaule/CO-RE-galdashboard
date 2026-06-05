@@ -65,8 +65,8 @@ const PLANES = {
   1: { cuotas: 1, descuento: 0.70, label: "1 Pago (Contado)" },
   2: { cuotas: 2, descuento: 0.65, label: "2 Pagos" },
   3: { cuotas: 3, descuento: 0.65, label: "3 Pagos" },
-  4: { cuotas: 4, descuento: 0.65, label: "4 Pagos" },
-  5: { cuotas: 5, descuento: 0.65, label: "5 Pagos" },
+  4: { cuotas: 4, descuento: 0.60, label: "4 Pagos" },
+  5: { cuotas: 5, descuento: 0.60, label: "5 Pagos" },
   6: { cuotas: 6, descuento: 0.60, label: "6 Pagos" },
 };
 
@@ -77,8 +77,8 @@ const ESCALAMIENTOS = {
   1: [40, 50, 60, 70],
   2: [40, 50, 60, 70],
   3: [35, 45, 55, 65],
-  4: [35, 45, 55, 65],
-  5: [35, 45, 55, 65],
+  4: [30, 40, 50, 60],
+  5: [30, 40, 50, 60],
   6: [30, 40, 50, 60],
 };
 
@@ -164,7 +164,7 @@ function getOrCreateOverlay() {
 }
 
 // Límites de descuento por cuotas (igual que calculadora principal)
-const LIMITES_MANUAL = { 1:0.70, 2:0.65, 3:0.65, 4:0.65, 5:0.65, 6:0.60 };
+const LIMITES_MANUAL = { 1:0.70, 2:0.65, 3:0.65, 4:0.60, 5:0.60, 6:0.60 };
 
 function actualizarPreviewManual() {
   const deuda    = parseFloat(document.getElementById("manualDeuda")?.value)   || 0;
@@ -492,7 +492,7 @@ function calcularInverso() {
   }
 
   const base   = deuda * 1.242;
-  const limites = { 1:0.70, 2:0.65, 3:0.65, 4:0.65, 5:0.65, 6:0.60 };
+  const limites = { 1:0.70, 2:0.65, 3:0.65, 4:0.60, 5:0.60, 6:0.60 };
   const resultados = [];
 
   estadoActual = { dni, nombre, deuda, grupo, descuentoBase: null, productos: obtenerProductos(), resultados: {} };
@@ -603,7 +603,7 @@ function calcularPropuestas() {
 
   estadoActual = { dni, nombre, deuda, grupo, descuentoBase, productos: obtenerProductos(), resultados: {} };
 
-  const limites = { 1: 0.70, 2: 0.65, 3: 0.65, 4: 0.65, 5: 0.65, 6: 0.60 };
+  const limites = { 1: 0.70, 2: 0.65, 3: 0.65, 4: 0.60, 5: 0.60, 6: 0.60 };
   let alertas = [];
 
   [1, 2, 3, 4, 5, 6].forEach((c) => {
@@ -634,7 +634,7 @@ function calcularPropuestas() {
 // Niveles de quita a mostrar en la tabla (de mayor a menor beneficio)
 const QUITA_NIVELES = [70, 65, 60, 55, 50, 45, 40, 35, 30, 20, 10, 0];
 // Límites por cuota (igual que el resto del sistema)
-const LIMITES_TABLA = { 1:70, 2:65, 3:65, 4:65, 5:65, 6:60 };
+const LIMITES_TABLA = { 1:70, 2:65, 3:65, 4:60, 5:60, 6:60 };
 // Planes a mostrar como columnas
 const CUOTAS_TABLA  = [1, 2, 3, 4, 5, 6];
 
@@ -692,9 +692,48 @@ function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
         td.className  = 'esc-td-nopermitido';
         td.textContent = '—';
       } else {
+        // ── Reglas de política interna ────────────────────────────
+        const esSinQuita   = quita === 0;
+        const esBajoSaldo  = deuda < 250000;
+        let   clasePolitica = '';
+        let   ocultarCelda  = false;
+
+        if (esBajoSaldo && quita > 20) {
+          // Saldo < $250K: solo se permite hasta 20% de quita
+          ocultarCelda = true;
+          td.className  = 'esc-td-nopermitido esc-td-policy-lock';
+          td.title      = '🔒 Saldo < $250.000: quita máxima 20%';
+          td.textContent = '🔒';
+          tr.appendChild(td);
+          return; // skip normal rendering
+        }
+
+        if (!esSinQuita) {
+          // Con quita: filtrar por rentabilidad de cuota
+          if (importeCuota < 250000) {
+            ocultarCelda = true;
+          } else if (importeCuota < 400000) {
+            clasePolitica = 'esc-td-no-rentable';
+          }
+        } else {
+          // Sin quita (0%): solo contado (1 pago), cuotas no tienen sentido sin descuento
+          if (c !== 1) {
+            ocultarCelda = true;
+          } else {
+            clasePolitica = 'esc-td-potable';
+          }
+        }
+
+        if (ocultarCelda) {
+          td.className  = 'esc-td-nopermitido';
+          td.textContent = '—';
+          tr.appendChild(td);
+          return;
+        }
+
         const cellKey  = `${quita}_${c}`;
         const selected = _escSeleccion.has(cellKey);
-        td.className   = 'esc-td-ok' + (selected ? ' esc-td-selected' : '');
+        td.className   = `esc-td-ok ${clasePolitica}${selected ? ' esc-td-selected' : ''}`.trim();
         td.innerHTML   = `${formatARS(importeCuota)}<span class="esc-check">${selected ? '✓' : ''}</span>`;
         td.title       = `${quita}% quita · ${c === 1 ? '1 Pago' : c + ' Pagos'} · ${formatARS(importeCuota)}/cuota — Click para seleccionar`;
         td.style.cursor = 'pointer';
@@ -718,13 +757,7 @@ function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
 
     if (filaResaltada) tr.classList.add('esc-row-match');
 
-    // Click en fila (columna quita) → calcula ese % directamente
-    const tdQuita = tr.querySelector('.esc-td-quita');
-    if (tdQuita) {
-      tdQuita.style.cursor = 'pointer';
-      tdQuita.title = `Click para calcular con ${quita}% de quita`;
-      tdQuita.addEventListener('click', () => usarFilaEscenario(quita));
-    }
+
 
     tbody.appendChild(tr);
   });
@@ -777,6 +810,13 @@ function toggleCeldaEscenario(quita, cuotas, importeCuota, totalPaga) {
       );
       return;
     }
+  }
+
+  // ── Validación de política interna ─────────────────────────────────
+  const _deudaActual = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  if (!isNaN(_deudaActual) && _deudaActual < 250000 && quita > 20) {
+    mostrarToast("🔒 Saldo menor a $250.000: la quita máxima permitida es 20%.", "error");
+    return;
   }
 
   // ── Validación lógica: coherencia entre cuotas y total ────────────
@@ -958,79 +998,69 @@ function limpiarSeleccion() {
 
 function copiarPropuestaCombinada() {
   if (_escSeleccion.size === 0) return;
-  const deuda   = parsearNumero(document.getElementById('inputDeuda')?.value || '');
-  const nombre  = document.getElementById('inputNombre')?.value?.trim() || '';
-  const dni     = document.getElementById('inputDni')?.value?.trim()    || '';
+  const deuda  = parsearNumero(document.getElementById('inputDeuda')?.value || '');
+  const nombre = document.getElementById('inputNombre')?.value?.trim() || '';
+  const dni    = document.getElementById('inputDni')?.value?.trim()    || '';
   if (isNaN(deuda) || deuda <= 0) { alert('⚠️ Ingresá la deuda primero.'); return; }
 
-  const base           = deuda * 1.242;
-  const nombreDisplay  = nombre ? ` *${nombre}*` : '';
-  const dniDisplay     = dni    ? ` (DNI: ${dni})` : '';
-  const hoy = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  const operador = localStorage.getItem('co_re_operador') || 'NN';
+  const base     = deuda * 1.242;
+  const hoy      = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
+  const vence    = calcularVencimiento48hs();
 
   const alternativas = Array.from(_escSeleccion.values())
     .sort((a, b) => b.quita - a.quita || a.cuotas - b.cuotas);
 
-  // Productos del acuerdo
-  const productosWA = obtenerProductos();
-  const productosTexto = productosWA
-    .map((p, i) => {
-      const num = p.numero && p.numero !== 'Estudio CO-RE' ? `  N° ${p.numero}` : (p.numero ? `  — ${p.numero}` : '');
-      return `${String(i+1).padStart(2,'0')}. ${p.tipo}${num}`;
-    }).join('\n');
+  // Productos
+  const productosWA    = obtenerProductos();
+  const productosLineas = productosWA.map(p => `* ${p.tipo}`).join('\n');
 
-  const bloques = alternativas.map(({ quita, cuotas, importeCuota }, i) => {
-    const total     = Math.ceil(base * (1 - quita / 100));
-    const capBanco  = total / 1.242;
-    const honAgenc  = total - capBanco;
-    const label     = cuotas === 1 ? '1 Pago (Contado)' : `${cuotas} Pagos`;
-    const cuotaLine = cuotas === 1
-      ? `💰 *Monto único:* ${formatARS(total)}`
-      : `💰 *Total a regularizar:* ${formatARS(total)}\n   📅 *Cuotas:* ${cuotas} × ${formatARS(Math.ceil(total / cuotas))}`;
-    const pagoLinea = cuotas === 1
-      ? `   → Banco (GALICIALEG):       ${formatARS(capBanco)}\n   → Honorarios (GALICIAHONORARIOS): ${formatARS(honAgenc)}`
-      : `   → Banco (GALICIALEG):       ${formatARS(capBanco / cuotas)}/cuota\n   → Honorarios (GALICIAHONORARIOS): ${formatARS(honAgenc / cuotas)}/cuota`;
-    return `✅ *ALTERNATIVA ${i + 1} — ${label}*\n🏷️ Quita: *${quita}%*\n${cuotaLine}\n${pagoLinea}`;
-  }).join('\n\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
+  // Opciones
+  const EMOJIS = ['1️⃣','2️⃣','3️⃣','4️⃣'];
+  const opcionesTexto = alternativas.map(({ quita, cuotas }, i) => {
+    const total      = Math.ceil(base * (1 - quita / 100));
+    const porCuota   = Math.ceil(total / cuotas);
+    const titulo     = cuotas === 1
+      ? 'PAGO CONTADO'
+      : `${cuotas} CUOTAS SIN INTERÉS`;
+    const detalle    = cuotas === 1
+      ? `Quita: ${quita}% | Total: ${formatARS(total)}`
+      : `Quita: ${quita}% | ${cuotas} cuotas de ${formatARS(porCuota)}`;
+    return `${EMOJIS[i]} OPCIÓN ${i + 1} – ${titulo}\n${detalle}`;
+  }).join('\n\n');
+
+  // Opciones en una línea para mantener el mensaje corto
+  const EMOJIS_CORTO = ['1️⃣','2️⃣','3️⃣','4️⃣'];
+  const opcionesCortas = alternativas.map(({ quita, cuotas }, i) => {
+    const total    = Math.ceil(base * (1 - quita / 100));
+    const porCuota = Math.ceil(total / cuotas);
+    if (cuotas === 1) {
+      return `${EMOJIS_CORTO[i]} Pago contado — ${quita}% de quita → *${formatARS(total)}*`;
+    }
+    return `${EMOJIS_CORTO[i]} ${cuotas} cuotas sin interés — ${quita}% → *${cuotas} × ${formatARS(porCuota)}*`;
+  }).join('\n');
 
   const texto =
-`━━━━━━━━━━━━━━━━━━━━━━━━
-🏦 *BANCO GALICIA — Propuesta de Regularización*
-📋 Mora Tardía · Extrajudicial
-📆 Fecha: ${hoy}   Vence: ${calcularVencimiento48hs()}
-━━━━━━━━━━━━━━━━━━━━━━━━
+`Buenas ${nombre || ''},
+Soy ${operador} — Estudio CO-RE, gestión extrajudicial Banco Galicia.
 
-Estimado/a${nombreDisplay}${dniDisplay},
+Saldo actualizado al ${hoy}: *${formatARS(deuda)}*
 
-Le presentamos *${alternativas.length} alternativas* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*.
+*${alternativas.length} propuestas (honorarios incluidos en todas):*
 
-📊 *Deuda original:* ${formatARS(deuda)}
-📊 *Saldo con honorarios (base cálculo):* ${formatARS(base)}
+${opcionesCortas}
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-📦 *PRODUCTOS INCLUIDOS EN EL ACUERDO*
-━━━━━━━━━━━━━━━━━━━━━━━━
-${productosTexto}
+⚠️ Los intereses modifican el saldo diariamente.
+⏰ Propuesta válida hasta el *${vence}*.
 
-━━━━━━━━━━━━━━━━━━━━━━━━
+¿Con cuál le queda mejor? Confirmando, le paso el detalle de pago.
 
-${bloques}
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-🏧 *DATOS DE PAGO*
-
-Honorarios de Gestión Extrajudicial 20%+IVA — Estudio CO-RE
-   → Pago al Banco  Alias: GALICIALEG  |  CBU: 0070686120000002247308
-   → Pago de Honorarios  Alias: GALICIAHONORARIOS  |  CBU: 0070999030004062897261
-
-_Las cuentas se encuentran a nombre de *Maria Valeria Fandiño* CUIT 27-20481581-5, única facultada por el Banco Galicia para recibir el pago por su cuenta y orden. Verifique en su sucursal._
-
-⚠️ Propuesta válida 48 horas hábiles. Los pagos deben enviarse a los CBU informados.
-_Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364_
-━━━━━━━━━━━━━━━━━━━━━━━━`;
+Saludos cordiales,
+🌐 www.co-re.com.ar | ✉️ correo@co-re.com.ar
+☎️ 0800-345-9707 | 📱 wa.me/541170581364`;
 
   copiarTexto(texto);
-  mostrarToast(`💬 Propuesta combinada (${alternativas.length} alternativas) copiada`, 'success');
+  mostrarToast(`💬 Propuesta (${alternativas.length} opciones) copiada`, 'success');
 }
 
 function generarPDFDesdeSeleccion(quita, cuotas) {
@@ -1275,10 +1305,9 @@ function renderizarResultados() {
   }
 
   const resultsGrid    = document.getElementById("resultsGrid");
-  const imputacionNote = document.getElementById("imputacionNote");
 
   resultsGrid.style.display    = "grid";
-  imputacionNote.style.display = "flex";
+
 
   setTimeout(() => {
     document.getElementById("urgenciaBanner")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1473,6 +1502,35 @@ GENERAR ACUERDO PDF (BLINDADO CON TRAMPA DE ERRORES)
 /* ─────────────────────────────────────────────────────────────────
    GENERAR ACUERDO PDF (DISEÑO GALICIA + TEXTO OFICIAL DEL BANCO)
    ───────────────────────────────────────────────────────────────── */
+function sanitizePDF(str) {
+  if (typeof str !== 'string') return str;
+  return str
+    .replace(/[áàäâã]/g, 'a').replace(/[ÁÀÄÂÃ]/g, 'A')
+    .replace(/[éèëê]/g,  'e').replace(/[ÉÈËÊ]/g,  'E')
+    .replace(/[íìïî]/g,  'i').replace(/[ÍÌÏÎ]/g,  'I')
+    .replace(/[óòöôõ]/g, 'o').replace(/[ÓÒÖÔÕ]/g, 'O')
+    .replace(/[úùüû]/g,  'u').replace(/[ÚÙÜÛ]/g,  'U')
+    .replace(/ñ/g, 'n').replace(/Ñ/g, 'N')
+    .replace(/[−–—]/g, '-')
+    .replace(/[·•]/g, '.')
+    .replace(/ª/g, 'a').replace(/º/g, 'o')
+    .replace(/[¿¡]/g, '')
+    .replace(/[^ -ÿ]/g, '');  // eliminar emojis y otros no-latin1
+}
+
+function getVencimientoPDF() {
+  const input = document.getElementById('inputVencimiento');
+  if (input && input.value) {
+    // Fecha elegida por el operador
+    const [y, m, d] = input.value.split('-');
+    return new Date(y, m - 1, d).toLocaleDateString('es-AR', {
+      day: '2-digit', month: '2-digit', year: 'numeric'
+    });
+  }
+  // Auto: 48 horas hábiles
+  return calcularVencimiento48hs();
+}
+
 function generateAgreementPDF(cuotasOrData, planOrData) {
   try {
     const manualData = typeof cuotasOrData === "object" && cuotasOrData !== null ? cuotasOrData : null;
@@ -1485,6 +1543,13 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     }
 
     const doc = new jsPDFConstructor({ orientation: "portrait", unit: "mm", format: "a4" });
+
+    // Patch automático: sanitizar tildes/ñ/símbolos en todos los doc.text()
+    const _origDocText = doc.text.bind(doc);
+    doc.text = function(txt, ...args) {
+      const clean = typeof txt === 'string' ? sanitizePDF(txt) : txt;
+      return _origDocText(clean, ...args);
+    };
 
     // Variables base
     const isManual = Boolean(manualData);
@@ -1665,7 +1730,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // Fila 4: Quita
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
-    doc.text(`− Quita aplicada (${pctQuitaPDF}%):`, col1, y + 34);
+    doc.text(`- Quita aplicada (${pctQuitaPDF}%):`, col1, y + 34);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(220, 38, 38); // rojo
     doc.text("- " + formatARS(montoQuitaPDF), col2, y + 34, { align: "right" });
@@ -1694,7 +1759,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
       doc.setTextColor(15, 23, 42);
       doc.setFontSize(8);
       doc.text(
-        `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1ª cuota estimada: ${calcularVencimiento48hs()}`,
+        `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${calcularVencimiento48hs()}`,
         col1, y + 51
       );
       y += 62;
@@ -1708,94 +1773,101 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(234, 88, 12);
     doc.setLineWidth(0.5);
-    doc.roundedRect(M, y, W - M * 2, 68, 3, 3, "FD");
-    
+    doc.roundedRect(M, y, W - M * 2, 62, 3, 3, "FD");
+
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("DATOS PARA EL PAGO — TRANSFERENCIA BANCARIA OBLIGATORIA", M + 6, y + 8);
-    
+    doc.text("DATOS PARA EL PAGO — TRANSFERENCIA BANCARIA OBLIGATORIA", M + 6, y + 7);
+
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
-    const textoAclaracion = "El mencionado importe cancelatorio es por TODO CONCEPTO, incluyendo cancelación de deuda y de los honorarios. Se deberán realizar 2 operaciones según detalle:";
-    const linesAclaracion = doc.splitTextToSize(textoAclaracion, W - M * 2 - 12);
-    doc.text(linesAclaracion, M + 6, y + 14);
+    doc.setFontSize(7.5);
+    const textoAclaracion = "Importe cancelatorio por TODO CONCEPTO (deuda + honorarios). Realizar 2 transferencias:";
+    doc.text(textoAclaracion, M + 6, y + 13);
 
-    let subY = y + 27;
+    let subY = y + 20;
 
     // --- Cuenta 1: Banco ---
     doc.setTextColor(15, 23, 42);
-    doc.setFontSize(8.5);
+    doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`1. PAGO PARA Banco Galicia y Buenos Aires S.A.U.   |   IMPORTE: ${formatARS(capitalBanco)}`, M + 6, subY);
-    
-    doc.setTextColor(100, 116, 139);
+    doc.text(`1. Banco Galicia  |  ${formatARS(capitalBanco)}`, M + 6, subY);
     doc.setFont("helvetica", "normal");
-    doc.text("Titular: MARIA VALERIA FANDIÑO   |   CUIT 27-20481581-5", M + 6, subY + 5);
-    doc.text(`CBU: ${CUENTAS.recaudacion.cbu}   |   ALIAS: ${CUENTAS.recaudacion.alias}`, M + 6, subY + 10);
+    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(7.5);
+    doc.text(`Titular: MARIA VALERIA FANDIÑO  CUIT 27-20481581-5`, M + 6, subY + 5);
+    doc.text(`CBU: ${CUENTAS.recaudacion.cbu}   ALIAS: ${CUENTAS.recaudacion.alias}`, M + 6, subY + 9);
 
-    subY += 22;
+    subY += 18;
 
     // --- Cuenta 2: Honorarios ---
     doc.setTextColor(15, 23, 42);
+    doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`2. PAGO DE HONORARIOS   |   IMPORTE: ${formatARS(honorariosAgencia)}`, M + 6, subY);
-    
-    doc.setTextColor(100, 116, 139);
+    doc.text(`2. Honorarios Estudio CO-RE  |  ${formatARS(honorariosAgencia)}`, M + 6, subY);
     doc.setFont("helvetica", "normal");
-    doc.text("Titular: MARIA VALERIA FANDIÑO   |   CUIT 27-20481581-5", M + 6, subY + 5);
-    doc.text(`CBU: ${CUENTAS.honorarios.cbu}   |   ALIAS: ${CUENTAS.honorarios.alias}`, M + 6, subY + 10);
+    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(7.5);
+    doc.text(`Titular: MARIA VALERIA FANDIÑO  CUIT 27-20481581-5`, M + 6, subY + 5);
+    doc.text(`CBU: ${CUENTAS.honorarios.cbu}   ALIAS: ${CUENTAS.honorarios.alias}`, M + 6, subY + 9);
 
-    y += 73;
+    y += 66;
 
     // =================================================================
-    // 5. BLOQUE 4: CIERRE Y CERTIFICADO
+    // 5. BLOQUE 4: CIERRE + VENCIMIENTO + FIRMA (unificado)
     // =================================================================
+    const vencPDF = getVencimientoPDF();
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.3);
-    doc.roundedRect(M, y, W - M * 2, 28, 3, 3, "FD");
-    
+    doc.roundedRect(M, y, W - M * 2, 44, 3, 3, "FD");
+
+    // Título
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("ACREDITACIÓN Y CERTIFICADO", M + 6, y + 7);
-    
+    doc.text("ACREDITACIÓN, VENCIMIENTO Y FIRMA", M + 6, y + 7);
+
+    // Vencimiento destacado
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(220, 38, 38);
+    doc.text(`⏰ Propuesta válida hasta: ${vencPDF}`, M + 6, y + 13);
+
+    // Texto cierre compacto
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
-    const textoCierre = "UNA VEZ REALIZADOS LOS PAGOS DEBEN ENVIAR AMBOS COMPROBANTES A LA CASILLA: cobranzasgalicia@co-re.com.ar.\n\nEl certificado de cancelación de los productos mencionados será emitido por el Estudio a los 15 días de efectivizados los pagos.";
-    const linesCierre = doc.splitTextToSize(textoCierre, W - M * 2 - 12);
-    doc.text(linesCierre, M + 6, y + 13);
-    
-    y += 33;
-
-    // =================================================================
-    // 6. FIRMAS
-    // =================================================================
-    const lineaY = y;
-    const inicioDerecha = W - M - 60;
-
-    doc.setDrawColor(148, 163, 184);
-    doc.setLineWidth(0.3);
-    doc.line(inicioDerecha, lineaY, W - M, lineaY);
-
-    doc.setTextColor(234, 88, 12);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text('María Valeria Fandiño', inicioDerecha, lineaY + 5);
-
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text('Apoderada', inicioDerecha, lineaY + 9);
-    doc.text('Estudio CO-RE | Banco Galicia', inicioDerecha, lineaY + 13);
-
-    doc.setTextColor(148, 163, 184);
     doc.setFontSize(7.5);
-    doc.text("Firma Autorizada", inicioDerecha, lineaY - 2);
+    doc.text("Enviar comprobantes a: cobranzasgalicia@co-re.com.ar", M + 6, y + 19);
+    doc.text("Certificado de cancelación emitido a los 15 días de efectivizados los pagos.", M + 6, y + 24);
+
+    // Separador firma
+    doc.setDrawColor(200, 210, 220);
+    doc.setLineWidth(0.2);
+    doc.line(M + 6, y + 28, W - M - 6, y + 28);
+
+    // Firma
+    const firmaX = W - M - 64;
+    doc.setDrawColor(100, 116, 139);
+    doc.setLineWidth(0.3);
+    doc.line(firmaX, y + 36, W - M - 6, y + 36);
+    doc.setTextColor(148, 163, 184);
+    doc.setFontSize(7);
+    doc.text("Firma Autorizada", firmaX, y + 33);
+    doc.setTextColor(234, 88, 12);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("María Valeria Fandiño", firmaX, y + 40);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text("Apoderada · Estudio CO-RE · Banco Galicia", firmaX, y + 44);
+
+    y += 48;  // fin del bloque cierre+firma
 
     // =================================================================
-    // 7. PIE DE PÁGINA
+    // 6. PIE DE PÁGINA
     // =================================================================
     doc.setFillColor(234, 88, 12);
     doc.rect(0, 282, W, 15, "F");
@@ -1862,6 +1934,10 @@ document.addEventListener("DOMContentLoaded", () => {
   initManualListeners();
 
   // Enter en el formulario lanza el cálculo
+  // Restaurar nombre del operador desde localStorage
+  const savedOp = localStorage.getItem('co_re_operador');
+  if (savedOp) { const el = document.getElementById('inputOperador'); if (el) el.value = savedOp; }
+
   // Live preview listeners
   document.getElementById("inputDeuda")?.addEventListener("input", actualizarLivePreview);
 

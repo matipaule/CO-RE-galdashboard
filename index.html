@@ -92,6 +92,12 @@
       <div class="card form-card" id="formCard">
         <div class="card-header-line">
           <span class="card-tag">NUEVO CASO</span>
+          <div class="operador-field-wrap">
+            <label class="operador-label">Operador:</label>
+            <input type="text" id="inputOperador" class="operador-input"
+                   placeholder="Tu nombre" maxlength="40"
+                   oninput="localStorage.setItem('co_re_operador', this.value)" />
+          </div>
         </div>
 
         <!-- Input oculto para compatibilidad con calcularPropuestas -->
@@ -128,6 +134,16 @@
                      readonly placeholder="0,00" tabindex="-1" />
             </div>
           </div>
+        </div>
+
+        <!-- VENCIMIENTO DE PROPUESTA -->
+        <div class=vencimiento-row>
+          <label class=vencimiento-label for=inputVencimiento>
+            📅 Vencimiento de propuesta
+          </label>
+          <input type="date" id="inputVencimiento" class="vencimiento-input" />
+          <span class="vencimiento-hint">Sin fecha → 48 hs hábiles automático</span>
+          <button class="btn-clear-venc" onclick="document.getElementById('inputVencimiento').value=''" type="button">✕</button>
         </div>
 
         <!-- Búsqueda por monto del cliente (opcional) -->
@@ -195,7 +211,7 @@
             </table>
           </div>
           <p class="tabla-esc-nota">
-            🟩 Dentro del límite · 🟨 Fuera del límite permitido · Celdas grises = no permitido para ese plan
+            🟢 Potable · 🟡 No recomendable · 🔴 No rentable (cuota &lt;$400K) · ⬜ Fuera de límite · 🔒 Política interna (&lt;$250K → max 20%)
           </p>
         </div>
 
@@ -208,7 +224,7 @@
           <div id="seleccionLista"></div>
           <div class="panel-sel-footer" id="panelSelFooter" style="display:none;">
             <button class="btn-propuesta-combinada" onclick="copiarPropuestaCombinada()">
-              💬 Copiar propuesta combinada (todas las alternativas)
+              💬 Copiar propuesta — paso 1 (sin datos de pago)
             </button>
           </div>
         </div>
@@ -216,11 +232,7 @@
 
       </div>
 
-      <!-- IMPUTACION NOTE -->
-      <div class="imputacion-note" id="imputacionNote" style="display:none;">
-        <span class="note-icon">ℹ</span>
-        <span><strong>Imputación:</strong> Prorrata entre productos, primero conceptos contabilizados, remanente a deuda financiera.</span>
-      </div>
+
 
       <!-- RESULT CARDS -->
       <div class="results-grid" id="resultsGrid" style="display:none;">
