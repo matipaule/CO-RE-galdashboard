@@ -716,11 +716,23 @@ function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
             clasePolitica = 'esc-td-no-rentable';
           }
         } else {
-          // Sin quita (0%): solo contado (1 pago), cuotas no tienen sentido sin descuento
-          if (c !== 1) {
+          // Sin quita (0%):
+          // - Deuda < $200K → solo 1 pago contado (ocultar cuotas)
+          // - Deuda >= $200K → mostrar cuotas con umbrales de potabilidad
+          if (deuda < 200000 && c !== 1) {
             ocultarCelda = true;
-          } else {
+          } else if (deuda < 200000 && c === 1) {
             clasePolitica = 'esc-td-potable';
+          } else {
+            // Deuda >= 200K: umbrales por importe de cuota
+            const importeXcuota = total / c;
+            if (importeXcuota < 150000) {
+              ocultarCelda = true;
+            } else if (importeXcuota < 250000) {
+              clasePolitica = 'esc-td-no-recomendable';
+            } else {
+              clasePolitica = 'esc-td-potable';
+            }
           }
         }
 
