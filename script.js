@@ -646,11 +646,15 @@ function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
 
   const base = deuda * 1.242;
 
+  // Para deudas grandes (desde $20.000.000) se habilita el plan de 9 cuotas (quita máx. 60%).
+  const cuotasTabla = deuda >= 20000000 ? [...CUOTAS_TABLA, 9] : CUOTAS_TABLA;
+  const limitesTabla = { ...LIMITES_TABLA, 9: 60 };
+
   // ── Encabezado ──────────────────────────────────────────────────
   const thead = document.getElementById('tablaEscenariosHead');
   thead.innerHTML = `<tr>
     <th class="esc-th-quita">% Quita</th>
-    ${CUOTAS_TABLA.map(c => `<th>${c === 1 ? '1 Pago' : c + ' Pagos'}</th>`).join('')}
+    ${cuotasTabla.map(c => `<th>${c === 1 ? '1 Pago' : c + ' Pagos'}</th>`).join('')}
   </tr>`;
 
   // ── Calcular referencia del cliente ─────────────────────────────
@@ -681,8 +685,8 @@ function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
 
     let filaResaltada = false;
 
-    CUOTAS_TABLA.forEach((c) => {
-      const limite     = LIMITES_TABLA[c];
+    cuotasTabla.forEach((c) => {
+      const limite     = limitesTabla[c];
       const permitido  = quita <= limite;
       const importeCuota = permitido ? Math.ceil(total / c) : null;
 
@@ -1018,7 +1022,7 @@ function copiarPropuestaCombinada() {
   const operador = localStorage.getItem('co_re_operador') || 'NN';
   const base     = deuda * 1.242;
   const hoy      = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
-  const vence    = calcularVencimiento48hs();
+  const vence    = getVencimiento();
 
   const alternativas = Array.from(_escSeleccion.values())
     .sort((a, b) => b.quita - a.quita || a.cuotas - b.cuotas);
@@ -1026,6 +1030,17 @@ function copiarPropuestaCombinada() {
   // Productos
   const productosWA    = obtenerProductos();
   const productosLineas = productosWA.map(p => `* ${p.tipo}`).join('\n');
+
+  // Desglose del saldo: capital + honorarios (24,2% = honorarios 20% + IVA 21%)
+  const honorarios = Math.ceil(base - deuda);
+  const productosDeuda = productosWA
+    .filter(p => p.tipo !== 'Honorarios de Gestión Extrajudicial');
+  const productosLineasMsg = productosDeuda
+    .map(p => `• ${p.tipo}${p.numero ? ` (${p.numero})` : ''}`)
+    .join('\n');
+  const bloqueProductos = productosLineasMsg
+    ? `Productos en gestión:\n${productosLineasMsg}\n\n`
+    : '';
 
   // Opciones
   const EMOJIS = ['1️⃣','2️⃣','3️⃣','4️⃣'];
@@ -1045,11 +1060,14 @@ function copiarPropuestaCombinada() {
   const opcionesCortas = alternativas.map(({ quita, cuotas }, i) => {
     const total    = Math.ceil(base * (1 - quita / 100));
     const porCuota = Math.ceil(total / cuotas);
-    const condQuita = quita > 0 ? `${quita}% de quita` : 'sin quita';
     if (cuotas === 1) {
-      return `${i + 1}. Pago contado (${condQuita}) → *${formatARS(total)}*`;
+      const cond = quita > 0 ? `${quita}% de quita` : 'pago contado';
+      return `${i + 1}. Pago contado (${cond}) → *${formatARS(total)}*`;
     }
-    return `${i + 1}. ${cuotas} cuotas sin interés (${condQuita}) → *${cuotas} × ${formatARS(porCuota)}*`;
+    const cond = quita > 0
+      ? `${quita}% de quita + financiación en ${cuotas} cuotas sin interés`
+      : `financiación en ${cuotas} cuotas sin interés (tasa 0%)`;
+    return `${i + 1}. ${cond} → *${cuotas} × ${formatARS(porCuota)}*`;
   }).join('\n');
 
   const texto =
@@ -1057,9 +1075,12 @@ function copiarPropuestaCombinada() {
 
 Le escribe ${operador}, del Estudio CO-RE, a cargo de la gestión extrajudicial de su deuda con Banco Galicia.
 
-Saldo actualizado al ${hoy}: *${formatARS(base)}*
+${bloqueProductos}Detalle del saldo al ${hoy}:
+Capital adeudado: ${formatARS(deuda)}
+Honorarios de gestión (incluyen IVA): ${formatARS(honorarios)}
+*Saldo total a cancelar: ${formatARS(base)}*
 
-Le acercamos ${alternativas.length} propuestas de cancelación (honorarios ya incluidos en todas):
+A este saldo total ya se le sumaron los honorarios; sobre él se calculan las siguientes propuestas:
 
 ${opcionesCortas}
 
@@ -1350,6 +1371,19 @@ function calcularVencimiento48hs() {
   });
 }
 
+// Vencimiento para los mensajes: respeta la fecha elegida en el calendario.
+// Si no se eligió ninguna, cae en las 48 hs hábiles automáticas.
+function getVencimiento() {
+  const input = document.getElementById('inputVencimiento');
+  if (input && input.value) {
+    const [y, m, d] = input.value.split('-');
+    return new Date(y, m - 1, d).toLocaleDateString('es-AR', {
+      weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+  }
+  return calcularVencimiento48hs();
+}
+
 /* ─────────────────────────────────────────────────────────────────
    COUNTDOWN VISUAL (actualiza cada segundo)
    ───────────────────────────────────────────────────────────────── */
@@ -1401,6 +1435,12 @@ function generarTextoWhatsApp(cuotas) {
   const capitalPorCuota   = capitalBanco / cuotas;
   const honPorCuota       = honorariosAgencia / cuotas;
 
+  // Línea de condición: si no hay quita, no mostramos "0%" (queda feo);
+  // en su lugar se resalta el beneficio de la financiación sin interés.
+  const lineaCondicion = plan.porcentaje > 0
+    ? `🏷️ Descuento aplicado: *${plan.porcentaje}%*\n`
+    : (cuotas > 1 ? `🏷️ Financiación en *${cuotas} cuotas sin interés* (tasa 0%)\n` : '');
+
   let cuotasDetalle = "";
   if (cuotas === 1) {
     cuotasDetalle = `💰 *Monto único:* ${formatARS(plan.montoRecuperar)}`;
@@ -1415,18 +1455,15 @@ function generarTextoWhatsApp(cuotas) {
 🏦 *BANCO GALICIA — Regularización de Deuda*
 📋 Mora Tardía · Extrajudicial
 📆 Fecha de emisión: ${hoy}
-📆 Fecha de vencimiento: ${calcularVencimiento48hs()}
+📆 Fecha de vencimiento: ${getVencimiento()}
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
 Estimado/a${nombreDisplay}${dniDisplay},
 
-Le informamos una propuesta de regularización de su deuda con *Banco Galicia* , gestionada por *Estudio CO-RE*.
+Se deja constancia de que usted ha seleccionado y aceptado la siguiente alternativa de regularización de su deuda con *Banco Galicia* , gestionada por *Estudio CO-RE*.
 
-📌 *PLAN SELECCIONADO: ${plan.label.toUpperCase()}*
-🏷️ Descuento aplicado: *${plan.porcentaje}%*
-
-${cuotasDetalle}
-
+📌 *CONDICIONES DEL ACUERDO: ${plan.label.toUpperCase()}*
+${lineaCondicion}${cuotasDetalle}
 ━━━━━━━━━━━━━━━━━━━━━━━━
 📦 *PRODUCTOS INCLUIDOS EN EL ACUERDO*
 ━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1435,26 +1472,19 @@ ${(estadoActual.productos || []).map((p, i) => {
   return `${String(i+1).padStart(2,'0')}. ${p.tipo}${num}`;
 }).join('\n')}
 
-━━━━━━━━━━━━━━━━━━━━━━━━
-📊 *DETALLE DEL CÁLCULO*
-━━━━━━━━━━━━━━━━━━━━━━━━
-
-   Deuda original:              ${formatARS(estadoActual.deuda)}
-   + Honorarios e IVA (24,2%): +${formatARS(plan.deudaConHonorarios - estadoActual.deuda)}
-   ──────────────────────────────
-   Base de cálculo:              ${formatARS(plan.deudaConHonorarios)}
-   − Quita (${plan.porcentaje}%):              -${formatARS(plan.montoDescuento)}
-   ──────────────────────────────
-   *Total a pagar:               ${formatARS(plan.montoRecuperar)}*
-
-━━━━━━━━━━━━━━━━━━━━━━━━
 🏧 *DATOS DE PAGO*
 
-Honorarios de Gestión Extrajudicial 20%+IVA — Estudio CO-RE
-   → Pago al Banco  Alias: GALICIALEG  |  CBU: 0070686120000002247308
-   → Pago de Honorarios  Alias: GALICIAHONORARIOS  |  CBU: 0070999030004062897261
+Del total con descuento (${formatARS(plan.montoRecuperar)}), el pago se divide en *dos* cuentas:
 
-_Las cuentas se encuentran a nombre de *Maria Valeria Fandiño* CUIT 27-20481581-5, única facultada por el Banco Galicia para recibir el pago por su cuenta y orden. Verifique en su sucursal._
+1) Capital de deuda → Banco Galicia
+   Alias: GALICIALEG  |  CBU: 0070686120000002247308
+   Importe: *${formatARS(capitalBanco)}*${cuotas > 1 ? `  (${cuotas} cuotas de ${formatARS(capitalPorCuota)})` : ''}
+
+2) Honorarios de Gestión (20% + IVA) → Estudio CO-RE
+   Alias: GALICIAHONORARIOS  |  CBU: 0070999030004062897261
+   Importe: *${formatARS(honorariosAgencia)}*${cuotas > 1 ? `  (${cuotas} cuotas de ${formatARS(honPorCuota)})` : ''}
+
+_Ambas cuentas se encuentran a nombre de *Maria Valeria Fandiño* CUIT 27-20481581-5, única facultada por el Banco Galicia para recibir el pago por su cuenta y orden. Verifique en su sucursal._
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ Propuesta válida 48 horas hábiles. Los pagos deben enviarse a los CBU informados.
@@ -1529,7 +1559,7 @@ function sanitizePDF(str) {
     .replace(/[·•]/g, '.')
     .replace(/ª/g, 'a').replace(/º/g, 'o')
     .replace(/[¿¡]/g, '')
-    .replace(/[^ -ÿ]/g, '');  // eliminar emojis y otros no-latin1
+    .replace(/[^ -ÿ]/g, '');  // eliminar emojis y otros no-latin1 (rango espacio..ÿ)
 }
 
 function getVencimientoPDF() {
@@ -1699,10 +1729,13 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     const baseConHon    = deudaOrigPDF * 1.242;
     const montoQuitaPDF = baseConHon - montoFinal;
     const pctQuitaPDF   = Math.round((montoQuitaPDF / baseConHon) * 100);
+    // Si no hay quita, se omite esa fila (queda feo mostrar 0%) y se sube el resto del bloque.
+    const tieneQuitaPDF = pctQuitaPDF > 0;
+    const dQ            = tieneQuitaPDF ? 0 : -6;
 
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(M, y, W - M * 2, anticipoPDF ? 64 : (cuotas > 1 ? 57 : 50), 3, 3, "FD");
+    doc.roundedRect(M, y, W - M * 2, (anticipoPDF ? 64 : (cuotas > 1 ? 57 : 50)) + dQ, 3, 3, "FD");
 
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
@@ -1741,44 +1774,46 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.text("Base de cálculo:", col1, y + 28);
     doc.text(formatARS(baseConHon), col2, y + 28, { align: "right" });
 
-    // Fila 4: Quita
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    doc.text(`- Quita aplicada (${pctQuitaPDF}%):`, col1, y + 34);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(220, 38, 38); // rojo
-    doc.text("- " + formatARS(montoQuitaPDF), col2, y + 34, { align: "right" });
+    // Fila 4: Quita (solo si hay quita; si es 0% se omite)
+    if (tieneQuitaPDF) {
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text(`- Quita aplicada (${pctQuitaPDF}%):`, col1, y + 34);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(220, 38, 38); // rojo
+      doc.text("- " + formatARS(montoQuitaPDF), col2, y + 34, { align: "right" });
+    }
 
     // Separador
     doc.setDrawColor(200, 210, 220);
     doc.setLineWidth(0.2);
-    doc.line(col1, y + 37, col2, y + 37);
+    doc.line(col1, y + 37 + dQ, col2, y + 37 + dQ);
 
     // Fila 5: Total a pagar
     doc.setFont("helvetica", "bold");
     doc.setTextColor(22, 163, 74); // verde
-    doc.text("TOTAL A PAGAR:", col1, y + 43);
-    doc.text(formatARS(montoFinal), col2, y + 43, { align: "right" });
+    doc.text("TOTAL A PAGAR:", col1, y + 43 + dQ);
+    doc.text(formatARS(montoFinal), col2, y + 43 + dQ, { align: "right" });
 
     // Detalle de cuotas / anticipo
     if (anticipoPDF) {
       doc.setFont("helvetica", "normal");
       doc.setTextColor(15, 23, 42);
       doc.setFontSize(8);
-      doc.text(`Anticipo: ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 51);
-      doc.text(`${anticipoPDF.nCuotas} cuota/s del saldo de ${formatARS(anticipoPDF.cuotaValor)} c/u`, col1, y + 57);
-      y += 65;
+      doc.text(`Anticipo: ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 51 + dQ);
+      doc.text(`${anticipoPDF.nCuotas} cuota/s del saldo de ${formatARS(anticipoPDF.cuotaValor)} c/u`, col1, y + 57 + dQ);
+      y += 65 + dQ;
     } else if (cuotas > 1) {
       doc.setFont("helvetica", "normal");
       doc.setTextColor(15, 23, 42);
       doc.setFontSize(8);
-      doc.text(
-        `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${calcularVencimiento48hs()}`,
-        col1, y + 51
-      );
-      y += 62;
+      const detalleCuotas = tieneQuitaPDF
+        ? `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${getVencimiento()}`
+        : `${cuotas} cuotas sin interés (tasa 0%) de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${getVencimiento()}`;
+      doc.text(detalleCuotas, col1, y + 51 + dQ);
+      y += 62 + dQ;
     } else {
-      y += 55;
+      y += 55 + dQ;
     }
 
     // =================================================================
