@@ -1042,34 +1042,36 @@ function copiarPropuestaCombinada() {
   }).join('\n\n');
 
   // Opciones en una línea para mantener el mensaje corto
-  const EMOJIS_CORTO = ['1️⃣','2️⃣','3️⃣','4️⃣'];
   const opcionesCortas = alternativas.map(({ quita, cuotas }, i) => {
     const total    = Math.ceil(base * (1 - quita / 100));
     const porCuota = Math.ceil(total / cuotas);
+    const condQuita = quita > 0 ? `${quita}% de quita` : 'sin quita';
     if (cuotas === 1) {
-      return `${EMOJIS_CORTO[i]} Pago contado — ${quita}% de quita → *${formatARS(total)}*`;
+      return `${i + 1}. Pago contado (${condQuita}) → *${formatARS(total)}*`;
     }
-    return `${EMOJIS_CORTO[i]} ${cuotas} cuotas sin interés — ${quita}% → *${cuotas} × ${formatARS(porCuota)}*`;
+    return `${i + 1}. ${cuotas} cuotas sin interés (${condQuita}) → *${cuotas} × ${formatARS(porCuota)}*`;
   }).join('\n');
 
   const texto =
-`Buenas ${nombre || ''},
-Soy ${operador} — Estudio CO-RE, gestión extrajudicial Banco Galicia.
+`Estimado/a ${nombre || ''}, buenos días.
 
-Saldo actualizado al ${hoy}: *${formatARS(deuda)}*
+Le escribe ${operador}, del Estudio CO-RE, a cargo de la gestión extrajudicial de su deuda con Banco Galicia.
 
-*${alternativas.length} propuestas (honorarios incluidos en todas):*
+Saldo actualizado al ${hoy}: *${formatARS(base)}*
+
+Le acercamos ${alternativas.length} propuestas de cancelación (honorarios ya incluidos en todas):
 
 ${opcionesCortas}
 
-⚠️ Los intereses modifican el saldo diariamente.
-⏰ Propuesta válida hasta el *${vence}*.
+Tenga en cuenta que los intereses modifican el saldo diariamente.
+Propuestas válidas hasta el ${vence}.
 
-¿Con cuál le queda mejor? Confirmando, le paso el detalle de pago.
+Quedamos a la espera de su respuesta para indicarle el medio de pago de la opción que elija.
 
 Saludos cordiales,
-🌐 www.co-re.com.ar | ✉️ correo@co-re.com.ar
-☎️ 0800-345-9707 | 📱 wa.me/541170581364`;
+${operador} — Estudio CO-RE
+www.co-re.com.ar | correo@co-re.com.ar
+0800-345-9707 | wa.me/541170581364`;
 
   copiarTexto(texto);
   mostrarToast(`💬 Propuesta (${alternativas.length} opciones) copiada`, 'success');
