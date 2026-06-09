@@ -172,14 +172,14 @@ function actualizarPreviewManual() {
   const cuotas   = parseInt(document.getElementById("manualCuotas")?.value, 10) || 1;
 
   const base     = deuda * 1.242;
-  const total    = capital * 1.242;
+  const total    = capital;            // el monto ingresado ya es el total con honorarios
   const descPct  = base > 0 ? (1 - total / base) : 0;
   const maxDesc  = LIMITES_MANUAL[cuotas] ?? 0.65;
   const maxBase  = base * (1 - maxDesc);
 
   const hint = document.getElementById("manualDescHint");
   if (hint && deuda > 0)
-    hint.textContent = `máx. ${Math.round(maxDesc*100)}% de quita → mín. ${formatARS(maxBase/1.242)} capital`;
+    hint.textContent = `máx. ${Math.round(maxDesc*100)}% de quita → mín. ${formatARS(maxBase)} a pagar`;
 
   const baseEl  = document.getElementById("previewBase");
   const descEl  = document.getElementById("previewDesc");
@@ -260,7 +260,6 @@ function obtenerProductosManuales() {
 function generarPdfManual() {
   const nombre = document.getElementById("manualNombre").value.trim();
   const dni = document.getElementById("manualDni").value.trim();
-  const producto = document.getElementById("manualProducto").value.trim();
   const deuda = parseFloat(document.getElementById("manualDeuda").value) || 0;
   const cuotas = parseInt(document.getElementById("manualCuotas").value, 10) || 1;
   const capital = parseFloat(document.getElementById("manualCapital").value) || 0;
@@ -275,25 +274,20 @@ function generarPdfManual() {
     document.getElementById("manualDni").focus();
     return;
   }
-  if (!producto) {
-    alert("⚠️ Completá Producto / Grupo.");
-    document.getElementById("manualProducto").focus();
-    return;
-  }
   if (deuda <= 0) {
     alert("⚠️ Ingresá una deuda total válida.");
     document.getElementById("manualDeuda").focus();
     return;
   }
   if (capital <= 0) {
-    alert("⚠️ Ingresá un monto capital acordado válido.");
+    alert("⚠️ Ingresá el monto acordado a pagar.");
     document.getElementById("manualCapital").focus();
     return;
   }
 
-  // Validar límite descuento
+  // El monto ingresado ya es el TOTAL final con honorarios incluidos.
   const base    = deuda * 1.242;
-  const total   = capital * 1.242;
+  const total   = capital;
   const descPct = base > 0 ? (1 - total / base) : 0;
   const maxDesc = LIMITES_MANUAL[cuotas] ?? 0.65;
   if (descPct > maxDesc + 0.001) {
@@ -312,7 +306,7 @@ function generarPdfManual() {
   }
 
   generateAgreementPDF({
-    nombre, dni, producto,
+    nombre, dni,
     deudaOriginal: deuda,
     cuotas,
     capitalAcordado: capital,
@@ -1562,8 +1556,8 @@ function sanitizePDF(str) {
     .replace(/[^ -ÿ]/g, '');  // eliminar emojis y otros no-latin1 (rango espacio..ÿ)
 }
 
-function getVencimientoPDF() {
-  const input = document.getElementById('inputVencimiento');
+function getVencimientoPDF(inputId = 'inputVencimiento') {
+  const input = document.getElementById(inputId);
   if (input && input.value) {
     // Fecha elegida por el operador
     const [y, m, d] = input.value.split('-');
@@ -1599,11 +1593,12 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     const isManual = Boolean(manualData);
     const plan = isManual
       ? {
+          // manualData.capitalAcordado es el TOTAL final a pagar (honorarios ya incluidos)
           label: manualData.cuotas === 1 ? "Emisión Manual 1 Pago" : `Emisión Manual ${manualData.cuotas} Pagos`,
-          porcentaje: manualData.deudaOriginal > 0 ? Math.round((1 - (manualData.capitalAcordado * 1.242) / (manualData.deudaOriginal * 1.242)) * 100) : 0,
+          porcentaje: manualData.deudaOriginal > 0 ? Math.round((1 - manualData.capitalAcordado / (manualData.deudaOriginal * 1.242)) * 100) : 0,
           hab: manualData.capitalAcordado * 0.16,
-          had: manualData.capitalAcordado * 0.242,
-          valorCuota: (manualData.capitalAcordado * 1.242) / manualData.cuotas,
+          had: manualData.capitalAcordado - manualData.capitalAcordado / 1.242,
+          valorCuota: manualData.capitalAcordado / manualData.cuotas,
         }
       : planOrData;
 
@@ -1671,7 +1666,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
-    const textoIntro = `Por medio de la presente informamos a Uds. que el/la Sr./Sra. ${(nombreDeudor || "-").toUpperCase()} con DNI: ${dniDeudor} registra una deuda con Banco Galicia y Buenos Aires S.A.U. que se encuentra en mora y a la fecha su saldo es de ${formatARS(deudaOriginal)}.-`;
+    const textoIntro = `Por medio de la presente informamos a Uds. que el/la Sr./Sra. ${(nombreDeudor || "-").toUpperCase()} con DNI: ${dniDeudor} registra una deuda con Banco Galicia y Buenos Aires S.A.U. que se encuentra en mora y a la fecha su saldo es de ${formatARS(deudaOriginal * 1.242)}.-`;
     const linesIntro = doc.splitTextToSize(textoIntro, W - M * 2 - 12);
     doc.text(linesIntro, M + 6, y + 20);
     
@@ -1866,7 +1861,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // =================================================================
     // 5. BLOQUE 4: CIERRE + VENCIMIENTO + FIRMA (unificado)
     // =================================================================
-    const vencPDF = getVencimientoPDF();
+    const vencPDF = getVencimientoPDF(isManual ? 'manualVencimiento' : 'inputVencimiento');
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.3);

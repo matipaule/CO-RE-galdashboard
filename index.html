@@ -502,10 +502,6 @@
             <input type="text" id="manualDni" class="form-input" placeholder="DNI sin puntos" />
           </div>
           <div class="form-group">
-            <label class="form-label" for="manualProducto">Producto / Grupo</label>
-            <input type="text" id="manualProducto" class="form-input" placeholder="Ej: Tarjeta Galicia Visa" />
-          </div>
-          <div class="form-group">
             <label class="form-label" for="manualDeuda">Deuda Total Original ($)</label>
             <div class="input-prefix-wrap">
               <span class="input-prefix">$</span>
@@ -525,14 +521,24 @@
           </div>
           <div class="form-group">
             <label class="form-label" for="manualCapital">
-              Monto Capital Acordado ($)
+              Monto Acordado a Pagar ($)
               <span id="manualDescHint" class="manual-desc-hint"></span>
             </label>
             <div class="input-prefix-wrap">
               <span class="input-prefix">$</span>
-              <input type="number" id="manualCapital" class="form-input with-prefix" step="0.01" placeholder="Monto sin honorarios" />
+              <input type="number" id="manualCapital" class="form-input with-prefix" step="0.01" placeholder="Total final con honorarios incluidos" />
             </div>
             <span id="manualValidMsg" class="manual-valid-msg"></span>
+          </div>
+          <div class="form-group">
+            <div class="vencimiento-row">
+              <label class="vencimiento-label" for="manualVencimiento">
+                📅 Vencimiento de propuesta
+              </label>
+              <input type="date" id="manualVencimiento" class="vencimiento-input" />
+              <span class="vencimiento-hint">Sin fecha → 48 hs hábiles automático</span>
+              <button class="btn-clear-venc" onclick="document.getElementById('manualVencimiento').value=''" type="button">✕</button>
+            </div>
           </div>
         </form>
 
