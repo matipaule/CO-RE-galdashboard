@@ -1612,6 +1612,9 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // Desglose oficial de Capital y Honorarios (Total / 1.242)
     const capitalBanco = montoFinal / 1.242;
     const honorariosAgencia = montoFinal - capitalBanco;
+    const cuotasPagoPDF   = isManual ? parseInt(manualData.cuotas, 10) || 1 : (cuotasOrData || 1);
+    const capitalPorCuotaPDF   = capitalBanco / cuotasPagoPDF;
+    const honorariosPorCuotaPDF = honorariosAgencia / cuotasPagoPDF;
 
     const W = 210;
     const M = 20;
@@ -1827,7 +1830,9 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
     doc.setFontSize(7.5);
-    const textoAclaracion = "Importe cancelatorio por TODO CONCEPTO (deuda + honorarios). Realizar 2 transferencias:";
+    const textoAclaracion = cuotasPagoPDF > 1
+      ? `Importe por TODO CONCEPTO (deuda + honorarios). Por cada una de las ${cuotasPagoPDF} cuotas, realizar 2 transferencias:`
+      : "Importe cancelatorio por TODO CONCEPTO (deuda + honorarios). Realizar 2 transferencias:";
     doc.text(textoAclaracion, M + 6, y + 13);
 
     let subY = y + 20;
@@ -1836,7 +1841,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`1. Banco Galicia  |  ${formatARS(capitalBanco)}`, M + 6, subY);
+    doc.text(`1. Banco Galicia  |  ${cuotasPagoPDF > 1 ? `${formatARS(capitalPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(capitalBanco)}`, M + 6, subY);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(7.5);
@@ -1849,7 +1854,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`2. Honorarios Estudio CO-RE  |  ${formatARS(honorariosAgencia)}`, M + 6, subY);
+    doc.text(`2. Honorarios Estudio CO-RE  |  ${cuotasPagoPDF > 1 ? `${formatARS(honorariosPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(honorariosAgencia)}`, M + 6, subY);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(7.5);
