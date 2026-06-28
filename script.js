@@ -54,9 +54,9 @@ const formatARS = (numero) =>
   new Intl.NumberFormat("es-AR", {
     style:    "currency",
     currency: "ARS",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numero);
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Math.round(Number(numero) || 0));
 
 /* ─────────────────────────────────────────────────────────────────
    PLANES DE DESCUENTO
