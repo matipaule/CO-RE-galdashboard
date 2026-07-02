@@ -1454,12 +1454,12 @@ function generarTextoWhatsApp(cuotas) {
 
 Estimado/a${nombreDisplay}${dniDisplay},
 
-Se deja constancia de que usted ha seleccionado y aceptado la siguiente alternativa de regularización de su deuda con *Banco Galicia* , gestionada por *Estudio CO-RE*.
+Le acercamos la siguiente *propuesta de pago* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*. La misma queda sujeta a su confirmación.
 
-📌 *CONDICIONES DEL ACUERDO: ${plan.label.toUpperCase()}*
+📌 *PROPUESTA DE PAGO: ${plan.label.toUpperCase()}*
 ${lineaCondicion}${cuotasDetalle}
 ━━━━━━━━━━━━━━━━━━━━━━━━
-📦 *PRODUCTOS INCLUIDOS EN EL ACUERDO*
+📦 *PRODUCTOS INCLUIDOS EN LA PROPUESTA*
 ━━━━━━━━━━━━━━━━━━━━━━━━
 ${(estadoActual.productos || []).map((p, i) => {
   const num = p.numero && p.numero !== 'Estudio CO-RE' ? `  N° ${p.numero}` : (p.numero ? `  — ${p.numero}` : '');
