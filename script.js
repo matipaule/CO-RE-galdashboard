@@ -207,9 +207,19 @@ function actualizarPreviewManual() {
     const d = getDatosAnticipo(total);
     const res = document.getElementById("anticipoResumen");
     if (res) {
-      if (d.anticipo <= 0) { res.textContent = "Ingresá el monto del anticipo."; res.className = "anticipo-resumen warn"; }
-      else if (d.anticipo >= total) { res.textContent = "⚠️ El anticipo no puede ser igual o mayor al total."; res.className = "anticipo-resumen error"; }
-      else { res.textContent = `Anticipo: ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}`; res.className = "anticipo-resumen ok"; }
+      if (d.totalCuotas < 2) {
+        res.textContent = "⚠️ Para usar anticipo elegí 2 o más cuotas arriba.";
+        res.className = "anticipo-resumen error";
+      } else if (d.anticipo <= 0) {
+        res.textContent = "Ingresá el monto del anticipo (cuenta como 1ª cuota).";
+        res.className = "anticipo-resumen warn";
+      } else if (d.anticipo >= total) {
+        res.textContent = "⚠️ El anticipo no puede ser igual o mayor al total.";
+        res.className = "anticipo-resumen error";
+      } else {
+        res.textContent = `Anticipo (1ª cuota): ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}  =  ${formatARS(total)}`;
+        res.className = "anticipo-resumen ok";
+      }
     }
   }
 }
@@ -224,11 +234,13 @@ function toggleAnticipo() {
 function esAnticipo() { return document.getElementById("anticipoCheck")?.checked || false; }
 
 function getDatosAnticipo(totalConHon) {
-  const anticipo   = parseFloat(document.getElementById("anticipoMonto")?.value) || 0;
-  const nCuotas    = parseInt(document.getElementById("anticipoCuotas")?.value, 10) || 1;
-  const saldo      = totalConHon - anticipo;
-  const cuotaValor = saldo > 0 ? saldo / nCuotas : 0;
-  return { anticipo, nCuotas, saldo, cuotaValor };
+  const anticipo    = parseFloat(document.getElementById("anticipoMonto")?.value) || 0;
+  // El anticipo cuenta como la 1ª cuota. El saldo se reparte en las cuotas restantes.
+  const totalCuotas = parseInt(document.getElementById("manualCuotas")?.value, 10) || 1;
+  const nCuotas     = Math.max(totalCuotas - 1, 0);   // cuotas del saldo
+  const saldo       = totalConHon - anticipo;
+  const cuotaValor  = (saldo > 0 && nCuotas > 0) ? saldo / nCuotas : 0;
+  return { anticipo, nCuotas, saldo, cuotaValor, totalCuotas };
 }
 
 function agregarProductoManual(tipo = "", numero = "") {
@@ -298,6 +310,10 @@ function generarPdfManual() {
   let anticipoData = null;
   if (esAnticipo()) {
     const d = getDatosAnticipo(total);
+    if (cuotas < 2) {
+      alert("⚠️ Para usar anticipo elegí 2 o más cuotas (el anticipo cuenta como 1ª cuota).");
+      return;
+    }
     if (d.anticipo <= 0 || d.anticipo >= total) {
       alert("⚠️ El anticipo debe ser mayor a $0 y menor al total con honorarios.");
       return;
@@ -1653,14 +1669,21 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
 
     let y = 46;
 
+    // Salto de página: si el próximo bloque (altura h) no entra antes del pie, pasa a hoja nueva.
+    const LIMITE_INFERIOR = 280;   // el pie arranca en 282
+    const GAP = 6;                 // aire uniforme entre todos los recuadros
+    function ensureSpace(h) {
+      if (y + h > LIMITE_INFERIOR) { doc.addPage(); y = 15; }
+    }
+
     // =================================================================
     // 2. BLOQUE 1: INTRODUCCIÓN Y TITULAR (Gris claro)
     // =================================================================
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.3);
-    doc.roundedRect(M, y, W - M * 2, 34, 3, 3, "FD");
-    
+    doc.roundedRect(M, y, W - M * 2, 32, 3, 3, "FD");
+
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
@@ -1674,23 +1697,24 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(71, 85, 105);
     const textoIntro = `Por medio de la presente informamos a Uds. que el/la Sr./Sra. ${(nombreDeudor || "-").toUpperCase()} con DNI: ${dniDeudor} registra una deuda con Banco Galicia y Buenos Aires S.A.U. que se encuentra en mora y a la fecha su saldo es de ${formatARS(deudaOriginal * 1.242)}.-`;
     const linesIntro = doc.splitTextToSize(textoIntro, W - M * 2 - 12);
-    doc.text(linesIntro, M + 6, y + 20);
-    
-    y += 38;
+    doc.text(linesIntro, M + 6, y + 19);
+
+    y += 32 + GAP;
 
     // =================================================================
     // 3. BLOQUE PRODUCTOS INCLUIDOS EN EL ACUERDO
     // =================================================================
-    const productosRaw = isManual
+    // Se listan TODOS los productos. Columnas adaptativas: 2 normalmente, 3 cuando son muchos.
+    const productos = isManual
       ? (manualData.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }])
       : (estadoActual.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }]);
-    // Límite de 5 productos para que el PDF entre en una página A4
-    const productos = productosRaw.slice(0, 5);
-    if (productosRaw.length > 5) {
-      console.warn("PDF: se muestran solo los primeros 5 productos para mantener el formato en una página.");
-    }
 
-    const alturaProductos = 12 + productos.length * 6 + 4;
+    const nColsProd = productos.length > 8 ? 3 : 2;
+    const rowHProd  = 4.8;
+    const filasProd = Math.ceil(productos.length / nColsProd);
+    const alturaProductos = 11 + filasProd * rowHProd + 3;
+    ensureSpace(alturaProductos);
+
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.3);
@@ -1699,28 +1723,27 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("PRODUCTOS INCLUIDOS EN EL ACUERDO", M + 6, y + 8);
+    doc.text("PRODUCTOS INCLUIDOS EN EL ACUERDO", M + 6, y + 7);
 
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(15, 23, 42);
-    let py = y + 12;
+    const colWProd = (W - M * 2) / nColsProd;
+    const maxWProd = colWProd - 5;
+    doc.setFontSize(nColsProd === 3 ? 6.3 : 7);
     productos.forEach((p, i) => {
-      const label = p.numero && p.numero !== "Estudio CO-RE"
-        ? `${String(i + 1).padStart(2, "0")}. ${p.tipo}  —  N° ${p.numero}`
-        : `${String(i + 1).padStart(2, "0")}. ${p.tipo}${p.numero ? "  —  " + p.numero : ""}`;
-      doc.setFontSize(8);
-      if (p.tipo === "Honorarios de Gestión Extrajudicial") {
-        doc.setTextColor(100, 116, 139);
-        doc.setFont("helvetica", "italic");
-      } else {
-        doc.setTextColor(15, 23, 42);
-        doc.setFont("helvetica", "normal");
-      }
-      doc.text(label, M + 8, py);
-      py += 6;
+      const col = i % nColsProd;
+      const row = Math.floor(i / nColsProd);
+      const px  = M + 5 + col * colWProd;
+      const py  = y + 12 + row * rowHProd;
+      const esHon = p.tipo === "Honorarios de Gestión Extrajudicial";
+      const label = esHon
+        ? `${String(i + 1).padStart(2, "0")}. ${p.tipo}`
+        : `${String(i + 1).padStart(2, "0")}. ${p.tipo}${p.numero ? "  N° " + p.numero : ""}`;
+      if (esHon) { doc.setTextColor(100, 116, 139); doc.setFont("helvetica", "italic"); }
+      else       { doc.setTextColor(15, 23, 42);   doc.setFont("helvetica", "normal"); }
+      const shown = doc.splitTextToSize(label, maxWProd)[0];   // evita que se pise con la otra columna
+      doc.text(shown, px, py);
     });
 
-    y += alturaProductos + 4;
+    y += alturaProductos + GAP;
 
     // =================================================================
     // 3. BLOQUE 2: FORMA DE PAGO
@@ -1734,96 +1757,63 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     const tieneQuitaPDF = pctQuitaPDF > 0;
     const dQ            = tieneQuitaPDF ? 0 : -6;
 
+    // Detalle del cálculo condensado (3 líneas) para que el contrato entre en una hoja.
+    const altForma = anticipoPDF ? 40 : (cuotas > 1 ? 34 : 29);
+    ensureSpace(altForma);
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(M, y, W - M * 2, (anticipoPDF ? 64 : (cuotas > 1 ? 57 : 50)) + dQ, 3, 3, "FD");
+    doc.roundedRect(M, y, W - M * 2, altForma, 3, 3, "FD");
+
+    const col1 = M + 6;
+    const col2 = W - M - 6;
 
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("CONDICIONES DEL ACUERDO — DETALLE DEL CÁLCULO", M + 6, y + 7);
+    doc.text("CONDICIONES DEL ACUERDO", col1, y + 7);
 
-    // Cadena de cálculo
-    const col1 = M + 6;
-    const col2 = W - M - 6;
-    doc.setFontSize(8);
-
-    // Fila 1: Deuda original
+    // Línea 1: deuda original + honorarios
+    doc.setFontSize(7.5);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    doc.text("Deuda original registrada:", col1, y + 14);
-    doc.setTextColor(15, 23, 42);
+    doc.setTextColor(90, 100, 115);
+    doc.text(`Deuda original: ${formatARS(deudaOrigPDF)}     +  Honorarios e IVA (24,2%): ${formatARS(baseConHon - deudaOrigPDF)}`, col1, y + 13);
+
+    // Línea 2: base (y quita si corresponde)
+    let l2 = `Base de cálculo: ${formatARS(baseConHon)}`;
+    if (tieneQuitaPDF) l2 += `      −  Quita (${pctQuitaPDF}%): -${formatARS(montoQuitaPDF)}`;
+    doc.text(l2, col1, y + 18);
+
+    // Línea 3: TOTAL destacado
     doc.setFont("helvetica", "bold");
-    doc.text(formatARS(deudaOrigPDF), col2, y + 14, { align: "right" });
-
-    // Fila 2: + Honorarios
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    doc.text("+ Honorarios e IVA (24,2%):", col1, y + 20);
-    doc.setTextColor(15, 23, 42);
-    doc.setFont("helvetica", "bold");
-    doc.text("+ " + formatARS(baseConHon - deudaOrigPDF), col2, y + 20, { align: "right" });
-
-    // Separador delgado
-    doc.setDrawColor(200, 210, 220);
-    doc.setLineWidth(0.2);
-    doc.line(col1, y + 23, col2, y + 23);
-
-    // Fila 3: Base de cálculo
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(30, 64, 175); // azul
-    doc.text("Base de cálculo:", col1, y + 28);
-    doc.text(formatARS(baseConHon), col2, y + 28, { align: "right" });
-
-    // Fila 4: Quita (solo si hay quita; si es 0% se omite)
-    if (tieneQuitaPDF) {
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100, 116, 139);
-      doc.text(`- Quita aplicada (${pctQuitaPDF}%):`, col1, y + 34);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(220, 38, 38); // rojo
-      doc.text("- " + formatARS(montoQuitaPDF), col2, y + 34, { align: "right" });
-    }
-
-    // Separador
-    doc.setDrawColor(200, 210, 220);
-    doc.setLineWidth(0.2);
-    doc.line(col1, y + 37 + dQ, col2, y + 37 + dQ);
-
-    // Fila 5: Total a pagar
-    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
     doc.setTextColor(22, 163, 74); // verde
-    doc.text("TOTAL A PAGAR:", col1, y + 43 + dQ);
-    doc.text(formatARS(montoFinal), col2, y + 43 + dQ, { align: "right" });
+    doc.text("TOTAL A PAGAR:", col1, y + 24.5);
+    doc.text(formatARS(montoFinal), col2, y + 24.5, { align: "right" });
 
     // Detalle de cuotas / anticipo
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(7.5);
     if (anticipoPDF) {
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(15, 23, 42);
-      doc.setFontSize(8);
-      doc.text(`Anticipo: ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 51 + dQ);
-      doc.text(`${anticipoPDF.nCuotas} cuota/s del saldo de ${formatARS(anticipoPDF.cuotaValor)} c/u`, col1, y + 57 + dQ);
-      y += 65 + dQ;
+      doc.text(`Anticipo (1a cuota): ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 31);
+      doc.text(`+ ${anticipoPDF.nCuotas} cuota/s del saldo de ${formatARS(anticipoPDF.cuotaValor)} c/u`, col1, y + 36);
     } else if (cuotas > 1) {
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(15, 23, 42);
-      doc.setFontSize(8);
       const detalleCuotas = tieneQuitaPDF
         ? `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${vencUnificadoPDF}`
         : `${cuotas} cuotas sin interés (tasa 0%) de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${vencUnificadoPDF}`;
-      doc.text(detalleCuotas, col1, y + 51 + dQ);
-      y += 62 + dQ;
-    } else {
-      y += 55 + dQ;
+      doc.text(detalleCuotas, col1, y + 31);
     }
+
+    y += altForma + GAP;
 
     // =================================================================
     // 4. BLOQUE 3: DATOS PARA EL PAGO (Borde Naranja)
     // =================================================================
+    ensureSpace(50);
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(234, 88, 12);
     doc.setLineWidth(0.5);
-    doc.roundedRect(M, y, W - M * 2, 62, 3, 3, "FD");
+    doc.roundedRect(M, y, W - M * 2, 50, 3, 3, "FD");
 
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
@@ -1833,9 +1823,26 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
     doc.setFontSize(7.5);
-    const textoAclaracion = cuotasPagoPDF > 1
-      ? `Importe por TODO CONCEPTO (deuda + honorarios). Por cada una de las ${cuotasPagoPDF} cuotas, realizar 2 transferencias:`
-      : "Importe cancelatorio por TODO CONCEPTO (deuda + honorarios). Realizar 2 transferencias:";
+
+    // Reparto por cuenta. Cada pago se divide: monto/1.242 → Banco (capital), resto → Honorarios.
+    // Con anticipo: el anticipo es la 1a cuota y el saldo va en las cuotas restantes.
+    const antBancoPDF   = anticipoPDF ? anticipoPDF.anticipo / 1.242 : 0;
+    const antHonPDF     = anticipoPDF ? anticipoPDF.anticipo - antBancoPDF : 0;
+    const cuotaBancoPDF = anticipoPDF ? anticipoPDF.cuotaValor / 1.242 : 0;
+    const cuotaHonPDF   = anticipoPDF ? anticipoPDF.cuotaValor - cuotaBancoPDF : 0;
+
+    const detBanco = anticipoPDF
+      ? `Anticipo ${formatARS(antBancoPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaBancoPDF)}`
+      : (cuotasPagoPDF > 1 ? `${formatARS(capitalPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(capitalBanco));
+    const detHon = anticipoPDF
+      ? `Anticipo ${formatARS(antHonPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaHonPDF)}`
+      : (cuotasPagoPDF > 1 ? `${formatARS(honorariosPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(honorariosAgencia));
+
+    const textoAclaracion = anticipoPDF
+      ? `Importe por TODO CONCEPTO (deuda + honorarios). El anticipo es la 1a cuota. En cada pago, realizar 2 transferencias:`
+      : (cuotasPagoPDF > 1
+        ? `Importe por TODO CONCEPTO (deuda + honorarios). Por cada una de las ${cuotasPagoPDF} cuotas, realizar 2 transferencias:`
+        : "Importe cancelatorio por TODO CONCEPTO (deuda + honorarios). Realizar 2 transferencias:");
     doc.text(textoAclaracion, M + 6, y + 13);
 
     let subY = y + 20;
@@ -1844,7 +1851,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`1. Banco Galicia  |  ${cuotasPagoPDF > 1 ? `${formatARS(capitalPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(capitalBanco)}`, M + 6, subY);
+    doc.text(`1. Banco Galicia  |  ${detBanco}`, M + 6, subY);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(7.5);
@@ -1857,23 +1864,24 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`2. Honorarios Estudio CO-RE  |  ${cuotasPagoPDF > 1 ? `${formatARS(honorariosPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(honorariosAgencia)}`, M + 6, subY);
+    doc.text(`2. Honorarios Estudio CO-RE  |  ${detHon}`, M + 6, subY);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(7.5);
     doc.text(`Titular: MARIA VALERIA FANDIÑO  CUIT 27-20481581-5`, M + 6, subY + 5);
     doc.text(`CBU: ${CUENTAS.honorarios.cbu}   ALIAS: ${CUENTAS.honorarios.alias}`, M + 6, subY + 9);
 
-    y += 66;
+    y += 50 + GAP;
 
     // =================================================================
     // 5. BLOQUE 4: CIERRE + VENCIMIENTO + FIRMA (unificado)
     // =================================================================
     const vencPDF = vencUnificadoPDF;
+    ensureSpace(46);
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.3);
-    doc.roundedRect(M, y, W - M * 2, 44, 3, 3, "FD");
+    doc.roundedRect(M, y, W - M * 2, 46, 3, 3, "FD");
 
     // Título
     doc.setTextColor(234, 88, 12);
@@ -1921,12 +1929,16 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // =================================================================
     // 6. PIE DE PÁGINA
     // =================================================================
-    doc.setFillColor(234, 88, 12);
-    doc.rect(0, 282, W, 15, "F");
-    
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(7);
-    doc.text(`CO-RE | Collection. Recovery | N° ${acuerdoID} | Documento oficial`, W / 2, 289, { align: "center" });
+    const totalPaginas = (doc.internal && doc.internal.getNumberOfPages) ? doc.internal.getNumberOfPages() : 1;
+    for (let pg = 1; pg <= totalPaginas; pg++) {
+      if (doc.setPage) doc.setPage(pg);
+      doc.setFillColor(234, 88, 12);
+      doc.rect(0, 282, W, 15, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text(`CO-RE | Collection. Recovery | N° ${acuerdoID} | Documento oficial`, W / 2, 289, { align: "center" });
+    }
 
     // Guardar
     doc.save(`Acuerdo_${(nombreDeudor || "Deudor").replace(/\s+/g, "_")}_${cuotas}Pagos.pdf`);
