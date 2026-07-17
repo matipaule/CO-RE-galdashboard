@@ -1609,6 +1609,9 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     const nombreDeudor = isManual ? manualData.nombre : estadoActual.nombre;
     const dniDeudor = isManual ? manualData.dni : estadoActual.dni;
 
+    // Fecha única de vencimiento: se usa tanto para la 1a cuota como para la validez de la oferta.
+    const vencUnificadoPDF = getVencimientoPDF(isManual ? 'manualVencimiento' : 'inputVencimiento');
+
     // Desglose oficial de Capital y Honorarios (Total / 1.242)
     const capitalBanco = montoFinal / 1.242;
     const honorariosAgencia = montoFinal - capitalBanco;
@@ -1806,8 +1809,8 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
       doc.setTextColor(15, 23, 42);
       doc.setFontSize(8);
       const detalleCuotas = tieneQuitaPDF
-        ? `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${getVencimiento()}`
-        : `${cuotas} cuotas sin interés (tasa 0%) de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${getVencimiento()}`;
+        ? `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${vencUnificadoPDF}`
+        : `${cuotas} cuotas sin interés (tasa 0%) de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${vencUnificadoPDF}`;
       doc.text(detalleCuotas, col1, y + 51 + dQ);
       y += 62 + dQ;
     } else {
@@ -1866,7 +1869,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // =================================================================
     // 5. BLOQUE 4: CIERRE + VENCIMIENTO + FIRMA (unificado)
     // =================================================================
-    const vencPDF = getVencimientoPDF(isManual ? 'manualVencimiento' : 'inputVencimiento');
+    const vencPDF = vencUnificadoPDF;
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.3);
