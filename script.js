@@ -174,7 +174,16 @@ function actualizarPreviewManual() {
   const base     = deuda * 1.242;
   const total    = capital;            // el monto ingresado ya es el total con honorarios
   const descPct  = base > 0 ? (1 - total / base) : 0;
-  const maxDesc  = LIMITES_MANUAL[cuotas] ?? 0.65;
+
+  // Cantidad de pagos para el límite de quita: con anticipo/seña usa los pagos reales.
+  const antOn = esAnticipo();
+  let cuotasLimite = cuotas;
+  if (antOn) {
+    const nc   = parseInt(document.getElementById("anticipoCuotas")?.value, 10) || 1;
+    const modo = getModoAnticipo();
+    cuotasLimite = Math.min(6, modo === 1 ? nc + 1 : nc);   // pagos totales que ve el banco
+  }
+  const maxDesc  = LIMITES_MANUAL[cuotasLimite] ?? 0.65;
   const maxBase  = base * (1 - maxDesc);
 
   const hint = document.getElementById("manualDescHint");
@@ -196,51 +205,88 @@ function actualizarPreviewManual() {
   if (base > 0 && capital > 0) {
     if (total > base + 0.01) error = "⚠️ El monto acordado supera la deuda con honorarios.";
     else if (descPct > maxDesc + 0.001)
-      error = `⚠️ Quita de ${Math.round(descPct*100)}% supera el límite de ${Math.round(maxDesc*100)}% para ${cuotas} cuota/s.`;
+      error = `⚠️ Quita de ${Math.round(descPct*100)}% supera el límite de ${Math.round(maxDesc*100)}% para ${cuotasLimite} pago/s.`;
   }
+
+  // Resumen y validación del anticipo/seña
+  if (antOn && capital > 0) {
+    const d = getDatosAnticipo(total);
+    const res = document.getElementById("anticipoResumen");
+    const etiqueta = d.modo === 2 ? "Seña" : "Anticipo (1ª cuota)";
+    let claseRes = "anticipo-resumen ok", txtRes = "";
+
+    if (d.anticipo <= 0) {
+      txtRes = "Ingresá el monto del anticipo / seña."; claseRes = "anticipo-resumen warn";
+    } else if (d.anticipo >= total) {
+      txtRes = "⚠️ El anticipo / seña no puede ser igual o mayor al total.";
+      claseRes = "anticipo-resumen error";
+      if (!error) error = txtRes;
+    } else if (d.nCuotas > d.maxPorModo) {
+      txtRes = `⚠️ En este modo el máximo es ${d.maxPorModo} cuotas del saldo.`;
+      claseRes = "anticipo-resumen error";
+      if (!error) error = txtRes;
+    } else if (d.estado === 'bloqueado') {
+      txtRes = `⚠️ ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)} queda debajo del mínimo de ${formatARS(d.piso)}. Bajá a ${d.maxCuotas > 0 ? "máx " + d.maxCuotas + " cuota/s" : "1 cuota o subí la seña"}.`;
+      claseRes = "anticipo-resumen error";
+      if (!error) error = txtRes;
+    } else {
+      const flag = d.estado === 'no_recomendable'
+        ? `  ⚠️ Cuota no recomendable (menor a ${formatARS(d.recomendable)}). Ideal: hasta ${d.maxCuotas} cuota/s.`
+        : `  ✓ Recomendable.`;
+      txtRes = `${etiqueta}: ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}  =  ${formatARS(total)}.${flag}`;
+      claseRes = d.estado === 'no_recomendable' ? "anticipo-resumen warn" : "anticipo-resumen ok";
+    }
+    if (res) { res.textContent = txtRes; res.className = claseRes; }
+  }
+
   if (alerta) { alerta.textContent = error; alerta.style.display = error ? "block" : "none"; }
   if (msg)    { msg.textContent = error; msg.className = error ? "manual-valid-msg error" : "manual-valid-msg ok"; }
   if (btn)    btn.disabled = Boolean(error) && base > 0 && capital > 0;
-
-  // Resumen anticipo
-  if (esAnticipo() && capital > 0) {
-    const d = getDatosAnticipo(total);
-    const res = document.getElementById("anticipoResumen");
-    if (res) {
-      if (d.totalCuotas < 2) {
-        res.textContent = "⚠️ Para usar anticipo elegí 2 o más cuotas arriba.";
-        res.className = "anticipo-resumen error";
-      } else if (d.anticipo <= 0) {
-        res.textContent = "Ingresá el monto del anticipo (cuenta como 1ª cuota).";
-        res.className = "anticipo-resumen warn";
-      } else if (d.anticipo >= total) {
-        res.textContent = "⚠️ El anticipo no puede ser igual o mayor al total.";
-        res.className = "anticipo-resumen error";
-      } else {
-        res.textContent = `Anticipo (1ª cuota): ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}  =  ${formatARS(total)}`;
-        res.className = "anticipo-resumen ok";
-      }
-    }
-  }
 }
 
 function toggleAnticipo() {
   const on = document.getElementById("anticipoCheck")?.checked;
   const fields = document.getElementById("anticipoFields");
   if (fields) fields.style.display = on ? "grid" : "none";
+  // Con anticipo/seña el campo "Cuotas" de arriba no aplica (el plan lo definen las cuotas del saldo).
+  const grpCuotas = document.getElementById("grpManualCuotas");
+  if (grpCuotas) grpCuotas.style.display = on ? "none" : "";
   actualizarPreviewManual();
 }
 
 function esAnticipo() { return document.getElementById("anticipoCheck")?.checked || false; }
 
+// Modo 1 = anticipo a cuenta (cuenta como 1ª cuota, máx 5 del saldo)
+// Modo 2 = seña aparte (no cuenta, máx 6 del saldo)
+function getModoAnticipo() {
+  return document.querySelector('input[name="anticipoModo"]:checked')?.value === '2' ? 2 : 1;
+}
+
 function getDatosAnticipo(totalConHon) {
-  const anticipo    = parseFloat(document.getElementById("anticipoMonto")?.value) || 0;
-  // El anticipo cuenta como la 1ª cuota. El saldo se reparte en las cuotas restantes.
-  const totalCuotas = parseInt(document.getElementById("manualCuotas")?.value, 10) || 1;
-  const nCuotas     = Math.max(totalCuotas - 1, 0);   // cuotas del saldo
-  const saldo       = totalConHon - anticipo;
-  const cuotaValor  = (saldo > 0 && nCuotas > 0) ? saldo / nCuotas : 0;
-  return { anticipo, nCuotas, saldo, cuotaValor, totalCuotas };
+  const anticipo = parseFloat(document.getElementById("anticipoMonto")?.value) || 0;
+  const modo     = getModoAnticipo();
+  const nCuotas  = parseInt(document.getElementById("anticipoCuotas")?.value, 10) || 1;
+  const deuda    = parseFloat(document.getElementById("manualDeuda")?.value) || 0;
+  const base     = deuda * 1.242;
+
+  // El total NO cambia: se resta el anticipo/seña y el saldo se divide en las cuotas.
+  const saldo      = totalConHon - anticipo;
+  const cuotaValor = (saldo > 0 && nCuotas > 0) ? saldo / nCuotas : 0;
+
+  // Umbrales del banco (mismos que la tabla de escenarios), según haya o no quita.
+  const hayQuita     = base > 0 && (1 - totalConHon / base) > 0.005;
+  const piso         = hayQuita ? 250000 : 150000;   // debajo = no permitido
+  const recomendable = hayQuita ? 400000 : 250000;   // debajo = permitido pero no recomendable
+
+  const maxPorModo = modo === 2 ? 6 : 5;
+  const maxPorPiso = saldo > 0 ? Math.floor(saldo / piso) : 0;
+  const maxCuotas  = Math.min(maxPorModo, maxPorPiso);   // puede dar 0 si el saldo es muy chico
+
+  let estado = 'ok';
+  if (cuotaValor > 0 && cuotaValor < piso)               estado = 'bloqueado';
+  else if (cuotaValor > 0 && cuotaValor < recomendable)  estado = 'no_recomendable';
+
+  return { modo, anticipo, nCuotas, saldo, cuotaValor, piso, recomendable, maxPorModo, maxCuotas, estado, hayQuita };
 }
 
 function agregarProductoManual(tipo = "", numero = "") {
@@ -301,30 +347,39 @@ function generarPdfManual() {
   const base    = deuda * 1.242;
   const total   = capital;
   const descPct = base > 0 ? (1 - total / base) : 0;
-  const maxDesc = LIMITES_MANUAL[cuotas] ?? 0.65;
-  if (descPct > maxDesc + 0.001) {
-    alert(`⚠️ La quita efectiva es ${Math.round(descPct*100)}%, supera el límite de ${Math.round(maxDesc*100)}% para ${cuotas} cuota/s.`);
-    return;
-  }
 
+  const antOn = esAnticipo();
   let anticipoData = null;
-  if (esAnticipo()) {
+  let cuotasLimite = cuotas;   // pagos que ve el banco (para el límite de quita)
+
+  if (antOn) {
     const d = getDatosAnticipo(total);
-    if (cuotas < 2) {
-      alert("⚠️ Para usar anticipo elegí 2 o más cuotas (el anticipo cuenta como 1ª cuota).");
+    cuotasLimite = Math.min(6, d.modo === 1 ? d.nCuotas + 1 : d.nCuotas);
+    if (d.anticipo <= 0 || d.anticipo >= total) {
+      alert("⚠️ El anticipo / seña debe ser mayor a $0 y menor al total.");
       return;
     }
-    if (d.anticipo <= 0 || d.anticipo >= total) {
-      alert("⚠️ El anticipo debe ser mayor a $0 y menor al total con honorarios.");
+    if (d.nCuotas > d.maxPorModo) {
+      alert(`⚠️ En este modo el máximo es ${d.maxPorModo} cuotas del saldo.`);
+      return;
+    }
+    if (d.estado === 'bloqueado') {
+      alert(`⚠️ Cada cuota (${formatARS(d.cuotaValor)}) queda por debajo del mínimo de ${formatARS(d.piso)}. Bajá la cantidad de cuotas${d.maxCuotas > 0 ? ` (máx ${d.maxCuotas})` : ""} o subí la seña.`);
       return;
     }
     anticipoData = d;
   }
 
+  const maxDesc = LIMITES_MANUAL[cuotasLimite] ?? 0.65;
+  if (descPct > maxDesc + 0.001) {
+    alert(`⚠️ La quita efectiva es ${Math.round(descPct*100)}%, supera el límite de ${Math.round(maxDesc*100)}% para ${cuotasLimite} pago/s.`);
+    return;
+  }
+
   generateAgreementPDF({
     nombre, dni,
     deudaOriginal: deuda,
-    cuotas,
+    cuotas: antOn ? cuotasLimite : cuotas,
     capitalAcordado: capital,
     productos: obtenerProductosManuales(),
     anticipo: anticipoData,
@@ -1150,6 +1205,7 @@ function copiarWASeleccion(quita, cuotas) {
   estadoActual.nombre  = nombre;
   estadoActual.dni     = dni;
   estadoActual.deuda   = deuda;
+  estadoActual.productos = obtenerProductos();   // ← faltaba: por eso no salían los productos
   estadoActual.resultados = estadoActual.resultados || {};
   estadoActual.resultados[cuotas] = {
     ...PLANES[cuotas] || { label: `${cuotas} Pagos`, cuotas },
@@ -1460,46 +1516,33 @@ function generarTextoWhatsApp(cuotas) {
       `📅 *Valor de cada cuota:* ${formatARS(plan.valorCuota)} x ${cuotas} meses`;
   }
 
+  const prodReales = (estadoActual.productos || []).filter(p => p.tipo !== 'Honorarios de Gestión Extrajudicial');
+  const productosLista = prodReales.length
+    ? prodReales.map((p, i) => `${i + 1}. ${p.tipo}${p.numero ? `  N° ${p.numero}` : ''}`).join('\n')
+    : '(según acuerdo)';
+
   const texto =
-`━━━━━━━━━━━━━━━━━━━━━━━━
-🏦 *BANCO GALICIA — Regularización de Deuda*
+`🏦 *BANCO GALICIA — Regularización de Deuda*
 📋 Mora Tardía · Extrajudicial
-📆 Fecha de emisión: ${hoy}
-📆 Fecha de vencimiento: ${getVencimiento()}
-━━━━━━━━━━━━━━━━━━━━━━━━
+📆 Emisión: ${hoy} · Vence: ${getVencimiento()}
 
 Estimado/a${nombreDisplay}${dniDisplay},
-
-Le acercamos la siguiente *propuesta de pago* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*. La misma queda sujeta a su confirmación.
+Le acercamos la siguiente *propuesta de pago* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*. Sujeta a su confirmación.
 
 📌 *PROPUESTA DE PAGO: ${plan.label.toUpperCase()}*
 ${lineaCondicion}${cuotasDetalle}
-━━━━━━━━━━━━━━━━━━━━━━━━
-📦 *PRODUCTOS INCLUIDOS EN LA PROPUESTA*
-━━━━━━━━━━━━━━━━━━━━━━━━
-${(estadoActual.productos || []).map((p, i) => {
-  const num = p.numero && p.numero !== 'Estudio CO-RE' ? `  N° ${p.numero}` : (p.numero ? `  — ${p.numero}` : '');
-  return `${String(i+1).padStart(2,'0')}. ${p.tipo}${num}`;
-}).join('\n')}
 
-🏧 *DATOS DE PAGO*
+📦 *Productos incluidos:*
+${productosLista}
 
-Del total con descuento (${formatARS(plan.montoRecuperar)}), el pago se divide en *dos* cuentas:
+🏧 *DATOS DE PAGO* — total ${formatARS(plan.montoRecuperar)}, en 2 cuentas:
+1) Capital → Banco Galicia · GALICIALEG · CBU 0070686120000002247308
+Importe: *${formatARS(capitalBanco)}*${cuotas > 1 ? ` (${cuotas} de ${formatARS(capitalPorCuota)})` : ''}
+2) Honorarios 20%+IVA → Estudio CO-RE · GALICIAHONORARIOS · CBU 0070999030004062897261
+Importe: *${formatARS(honorariosAgencia)}*${cuotas > 1 ? ` (${cuotas} de ${formatARS(honPorCuota)})` : ''}
+_Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal._
 
-1) Capital de deuda → Banco Galicia
-   Alias: GALICIALEG  |  CBU: 0070686120000002247308
-   Importe: *${formatARS(capitalBanco)}*${cuotas > 1 ? `  (${cuotas} cuotas de ${formatARS(capitalPorCuota)})` : ''}
-
-2) Honorarios de Gestión (20% + IVA) → Estudio CO-RE
-   Alias: GALICIAHONORARIOS  |  CBU: 0070999030004062897261
-   Importe: *${formatARS(honorariosAgencia)}*${cuotas > 1 ? `  (${cuotas} cuotas de ${formatARS(honPorCuota)})` : ''}
-
-_Ambas cuentas se encuentran a nombre de *Maria Valeria Fandiño* CUIT 27-20481581-5, única facultada por el Banco Galicia para recibir el pago por su cuenta y orden. Verifique en su sucursal._
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ Propuesta válida 48 horas hábiles. Los pagos deben enviarse a los CBU informados.
-_Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364_
-━━━━━━━━━━━━━━━━━━━━━━━━`;
+⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364`;
 
   return texto;
 }
@@ -1795,7 +1838,8 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(7.5);
     if (anticipoPDF) {
-      doc.text(`Anticipo (1a cuota): ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 31);
+      const etqAnt = anticipoPDF.modo === 2 ? "Seña (pago inicial)" : "Anticipo (1a cuota)";
+      doc.text(`${etqAnt}: ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 31);
       doc.text(`+ ${anticipoPDF.nCuotas} cuota/s del saldo de ${formatARS(anticipoPDF.cuotaValor)} c/u`, col1, y + 36);
     } else if (cuotas > 1) {
       const detalleCuotas = tieneQuitaPDF
@@ -1831,15 +1875,16 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     const cuotaBancoPDF = anticipoPDF ? anticipoPDF.cuotaValor / 1.242 : 0;
     const cuotaHonPDF   = anticipoPDF ? anticipoPDF.cuotaValor - cuotaBancoPDF : 0;
 
+    const etqAntCta = (anticipoPDF && anticipoPDF.modo === 2) ? "Seña" : "Anticipo";
     const detBanco = anticipoPDF
-      ? `Anticipo ${formatARS(antBancoPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaBancoPDF)}`
+      ? `${etqAntCta} ${formatARS(antBancoPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaBancoPDF)}`
       : (cuotasPagoPDF > 1 ? `${formatARS(capitalPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(capitalBanco));
     const detHon = anticipoPDF
-      ? `Anticipo ${formatARS(antHonPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaHonPDF)}`
+      ? `${etqAntCta} ${formatARS(antHonPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaHonPDF)}`
       : (cuotasPagoPDF > 1 ? `${formatARS(honorariosPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(honorariosAgencia));
 
     const textoAclaracion = anticipoPDF
-      ? `Importe por TODO CONCEPTO (deuda + honorarios). El anticipo es la 1a cuota. En cada pago, realizar 2 transferencias:`
+      ? `Importe por TODO CONCEPTO (deuda + honorarios). ${anticipoPDF.modo === 2 ? "La seña es un pago inicial aparte" : "El anticipo es la 1a cuota"}. En cada pago, realizar 2 transferencias:`
       : (cuotasPagoPDF > 1
         ? `Importe por TODO CONCEPTO (deuda + honorarios). Por cada una de las ${cuotasPagoPDF} cuotas, realizar 2 transferencias:`
         : "Importe cancelatorio por TODO CONCEPTO (deuda + honorarios). Realizar 2 transferencias:");

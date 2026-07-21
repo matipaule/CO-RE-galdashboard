@@ -508,7 +508,7 @@
               <input type="number" id="manualDeuda" class="form-input with-prefix" step="0.01" placeholder="0.00" />
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group" id="grpManualCuotas">
             <label class="form-label" for="manualCuotas">Cuotas</label>
             <select id="manualCuotas" class="form-input form-select">
               <option value="1">1 Pago</option>
@@ -546,25 +546,47 @@
         <div class="anticipo-section">
           <label class="anticipo-toggle-label">
             <input type="checkbox" id="anticipoCheck" onchange="toggleAnticipo(); actualizarPreviewManual();" />
-            <span>Plan irregular (anticipo + cuotas del saldo)</span>
+            <span>Plan con anticipo / seña</span>
           </label>
           <div id="anticipoFields" style="display:none;" class="anticipo-fields">
+
+            <div class="form-group" style="grid-column:1 / -1;">
+              <label class="form-label">Modo</label>
+              <div class="anticipo-modo" style="display:flex; flex-direction:column; gap:6px;">
+                <label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer;">
+                  <input type="radio" name="anticipoModo" value="1" checked onchange="actualizarPreviewManual()" style="margin-top:3px;" />
+                  <span><strong>Anticipo a cuenta</strong> <span class="vencimiento-hint">(caso nuevo — el anticipo es la 1ª cuota · máx. 5 cuotas del saldo)</span></span>
+                </label>
+                <label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer;">
+                  <input type="radio" name="anticipoModo" value="2" onchange="actualizarPreviewManual()" style="margin-top:3px;" />
+                  <span><strong>Seña aparte</strong> <span class="vencimiento-hint">(plan ya pactado — la seña no cuenta · máx. 6 cuotas del saldo)</span></span>
+                </label>
+              </div>
+            </div>
+
             <div class="form-group">
-              <label class="form-label" for="anticipoMonto">Anticipo ($)</label>
+              <label class="form-label" for="anticipoMonto">Anticipo / Seña ($)</label>
               <div class="input-prefix-wrap">
                 <span class="input-prefix">$</span>
                 <input type="number" id="anticipoMonto" class="form-input with-prefix"
                        step="0.01" placeholder="0.00" oninput="actualizarPreviewManual()" />
               </div>
             </div>
+
             <div class="form-group">
-              <label class="form-label" for="anticipoCuotas">Cuotas del saldo restante</label>
+              <label class="form-label" for="anticipoCuotas">Cuotas del saldo</label>
               <select id="anticipoCuotas" class="form-input form-select" onchange="actualizarPreviewManual()">
                 <option value="1">1 cuota</option>
                 <option value="2">2 cuotas</option>
+                <option value="3">3 cuotas</option>
+                <option value="4">4 cuotas</option>
+                <option value="5">5 cuotas</option>
+                <option value="6">6 cuotas</option>
               </select>
+              <span class="vencimiento-hint">El total no cambia: se resta el anticipo/seña y el saldo se divide en estas cuotas.</span>
             </div>
-            <div class="anticipo-preview">
+
+            <div class="anticipo-preview" style="grid-column:1 / -1;">
               <span id="anticipoResumen" class="anticipo-resumen"></span>
             </div>
           </div>
