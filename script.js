@@ -386,6 +386,102 @@ function generarPdfManual() {
   });
 }
 
+// Genera el TEXTO de la propuesta (estilo WhatsApp) desde la emisión manual.
+function generarTextoManual() {
+  const nombre = document.getElementById("manualNombre")?.value?.trim() || "";
+  const dni    = document.getElementById("manualDni")?.value?.trim()    || "";
+  const deuda  = parseFloat(document.getElementById("manualDeuda")?.value)   || 0;
+  const capital= parseFloat(document.getElementById("manualCapital")?.value) || 0;
+
+  if (!nombre)      { alert("⚠️ Completá Nombre y Apellido."); return; }
+  if (!dni)         { alert("⚠️ Completá DNI."); return; }
+  if (deuda <= 0)   { alert("⚠️ Ingresá una deuda total válida."); return; }
+  if (capital <= 0) { alert("⚠️ Ingresá el monto acordado a pagar."); return; }
+
+  const base  = deuda * 1.242;
+  const total = capital;
+  const pctQuita = base > 0 ? Math.round((1 - total / base) * 100) : 0;
+  const capitalBanco = total / 1.242;
+  const honorarios   = total - capitalBanco;
+
+  const hoy  = new Date().toLocaleDateString("es-AR", { day:"2-digit", month:"2-digit", year:"numeric" });
+  const venc = getVencimientoPDF('manualVencimiento');
+
+  const cManual = parseInt(document.getElementById("manualCuotas")?.value, 10) || 1;
+  const antOn   = esAnticipo();
+  let d = null;
+  if (antOn) {
+    d = getDatosAnticipo(total);
+    if (d.anticipo <= 0 || d.anticipo >= total) { alert("⚠️ El anticipo / seña debe ser mayor a $0 y menor al total."); return; }
+    if (d.nCuotas > d.maxPorModo)  { alert(`⚠️ En este modo el máximo es ${d.maxPorModo} cuotas del saldo.`); return; }
+    if (d.estado === 'bloqueado')  { alert(`⚠️ Cada cuota (${formatARS(d.cuotaValor)}) queda por debajo del mínimo de ${formatARS(d.piso)}. Bajá las cuotas o subí la seña.`); return; }
+  }
+
+  // Etiqueta, condición y detalle
+  let label, condicion = "", detalle;
+  if (antOn) {
+    const etq = d.modo === 2 ? "Seña" : "Anticipo (1ª cuota)";
+    label   = `${d.modo === 2 ? "SEÑA" : "ANTICIPO"} + ${d.nCuotas} ${d.nCuotas === 1 ? "CUOTA" : "CUOTAS"}`;
+    if (pctQuita > 0)      condicion = `🏷️ Descuento aplicado: *${pctQuita}%*\n`;
+    else if (d.nCuotas > 1) condicion = `🏷️ Financiación sin interés (tasa 0%)\n`;
+    detalle = `💰 *Total a pagar:* ${formatARS(total)}\n📅 ${etq}: ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}`;
+  } else {
+    label   = cManual === 1 ? "PAGO CONTADO" : `${cManual} CUOTAS`;
+    if (pctQuita > 0)       condicion = `🏷️ Descuento aplicado: *${pctQuita}%*\n`;
+    else if (cManual > 1)   condicion = `🏷️ Financiación sin interés (tasa 0%)\n`;
+    detalle = cManual === 1
+      ? `💰 *Monto único:* ${formatARS(total)}`
+      : `💰 *Total a pagar:* ${formatARS(total)}\n📅 *${cManual} cuotas de ${formatARS(total / cManual)}*`;
+  }
+
+  // Reparto por cuenta (÷1,242)
+  let impBanco, impHon;
+  if (antOn) {
+    const antB = d.anticipo / 1.242, cB = d.cuotaValor / 1.242;
+    const antH = d.anticipo - antB, cH = d.cuotaValor - cB;
+    const etq = d.modo === 2 ? "Seña" : "Anticipo";
+    impBanco = `${etq} ${formatARS(antB)} + ${d.nCuotas} de ${formatARS(cB)}`;
+    impHon   = `${etq} ${formatARS(antH)} + ${d.nCuotas} de ${formatARS(cH)}`;
+  } else {
+    impBanco = cManual > 1 ? `${formatARS(capitalBanco / cManual)} x ${cManual} cuotas` : formatARS(capitalBanco);
+    impHon   = cManual > 1 ? `${formatARS(honorarios / cManual)} x ${cManual} cuotas`   : formatARS(honorarios);
+  }
+
+  const prods = obtenerProductosManuales().filter(p => p.tipo !== 'Honorarios de Gestión Extrajudicial');
+  const productosLista = prods.length
+    ? prods.map((p, i) => `${i + 1}. ${p.tipo}${p.numero ? `  N° ${p.numero}` : ''}`).join('\n')
+    : '(según acuerdo)';
+
+  const nombreDisplay = ` *${nombre.toUpperCase()}*`;
+  const dniDisplay    = ` (DNI: ${dni})`;
+
+  const texto =
+`🏦 *BANCO GALICIA — Regularización de Deuda*
+📋 Mora Tardía · Extrajudicial
+📆 Emisión: ${hoy} · Vence: ${venc}
+
+Estimado/a${nombreDisplay}${dniDisplay},
+Le acercamos la siguiente *propuesta de pago* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*. Sujeta a su confirmación.
+
+📌 *PROPUESTA DE PAGO: ${label}*
+${condicion}${detalle}
+
+📦 *Productos incluidos:*
+${productosLista}
+
+🏧 *DATOS DE PAGO* — total ${formatARS(total)}, en 2 cuentas:
+1) Capital → Banco Galicia · GALICIALEG · CBU 0070686120000002247308
+Importe: *${impBanco}*
+2) Honorarios 20%+IVA → Estudio CO-RE · GALICIAHONORARIOS · CBU 0070999030004062897261
+Importe: *${impHon}*
+_Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal._
+
+⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364`;
+
+  copiarTexto(texto);
+  mostrarToast("💬 Propuesta (texto) copiada", "success");
+}
+
 function prepararPDF(nombre, dni, producto, deuda, cuotas, capitalAcordado) {
   generateAgreementPDF({ nombre, dni, producto, deudaOriginal: deuda, cuotas, capitalAcordado });
 }
