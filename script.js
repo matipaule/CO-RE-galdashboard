@@ -476,7 +476,7 @@ Importe: *${impBanco}*
 Importe: *${impHon}*
 _Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal._
 
-⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364`;
+⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
 
   copiarTexto(texto);
   mostrarToast("💬 Propuesta (texto) copiada", "success");
@@ -1253,7 +1253,7 @@ Quedamos a la espera de su respuesta para indicarle el medio de pago de la opci�
 Saludos cordiales,
 ${operador} — Estudio CO-RE
 www.co-re.com.ar | correo@co-re.com.ar
-0800-345-9707 | wa.me/541170581364`;
+0800-345-9707 | wa.me/5491158977596`;
 
   copiarTexto(texto);
   mostrarToast(`💬 Propuesta (${alternativas.length} opciones) copiada`, 'success');
@@ -1638,7 +1638,7 @@ Importe: *${formatARS(capitalBanco)}*${cuotas > 1 ? ` (${cuotas} de ${formatARS(
 Importe: *${formatARS(honorariosAgencia)}*${cuotas > 1 ? ` (${cuotas} de ${formatARS(honPorCuota)})` : ''}
 _Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal._
 
-⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-7058-1364`;
+⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
 
   return texto;
 }
@@ -2018,11 +2018,11 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // 5. BLOQUE 4: CIERRE + VENCIMIENTO + FIRMA (unificado)
     // =================================================================
     const vencPDF = vencUnificadoPDF;
-    ensureSpace(46);
+    ensureSpace(49);
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.3);
-    doc.roundedRect(M, y, W - M * 2, 46, 3, 3, "FD");
+    doc.roundedRect(M, y, W - M * 2, 49, 3, 3, "FD");
 
     // Título
     doc.setTextColor(234, 88, 12);
@@ -2040,32 +2040,37 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setFont("helvetica", "normal");
     doc.setTextColor(71, 85, 105);
     doc.setFontSize(7.5);
-    doc.text("Enviar comprobantes a: cobranzasgalicia@co-re.com.ar", M + 6, y + 19);
-    doc.text("Certificado de cancelación emitido a los 15 días de efectivizados los pagos.", M + 6, y + 24);
+    doc.text("Enviar comprobantes a: cobranzasgalicia@co-re.com.ar", M + 6, y + 18);
+    doc.text("Certificado de cancelación emitido a los 15 días de efectivizados los pagos.", M + 6, y + 22.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(15, 23, 42);
+    doc.text("Consultas: 0800-345-9707  ·  WhatsApp: 11-5897-7596  ·  www.co-re.com.ar", M + 6, y + 27);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(71, 85, 105);
 
     // Separador firma
     doc.setDrawColor(200, 210, 220);
     doc.setLineWidth(0.2);
-    doc.line(M + 6, y + 28, W - M - 6, y + 28);
+    doc.line(M + 6, y + 31, W - M - 6, y + 31);
 
     // Firma
     const firmaX = W - M - 64;
     doc.setDrawColor(100, 116, 139);
     doc.setLineWidth(0.3);
-    doc.line(firmaX, y + 36, W - M - 6, y + 36);
+    doc.line(firmaX, y + 39, W - M - 6, y + 39);
     doc.setTextColor(148, 163, 184);
     doc.setFontSize(7);
-    doc.text("Firma Autorizada", firmaX, y + 33);
+    doc.text("Firma Autorizada", firmaX, y + 36);
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("María Valeria Fandiño", firmaX, y + 40);
+    doc.text("María Valeria Fandiño", firmaX, y + 43);
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
-    doc.text("Apoderada · Estudio CO-RE · Banco Galicia", firmaX, y + 44);
+    doc.text("Apoderada · Estudio CO-RE · Banco Galicia", firmaX, y + 47);
 
-    y += 48;  // fin del bloque cierre+firma
+    y += 51;  // fin del bloque cierre+firma
 
     // =================================================================
     // 6. PIE DE PÁGINA
