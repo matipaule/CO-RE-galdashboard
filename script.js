@@ -429,8 +429,13 @@ function generarTextoManual() {
     label   = cManual === 1 ? "PAGO CONTADO" : `${cManual} CUOTAS`;
     if (pctQuita > 0)       condicion = `🏷️ Descuento aplicado: *${pctQuita}%*\n`;
     else if (cManual > 1)   condicion = `🏷️ Financiación sin interés (tasa 0%)\n`;
+    // En cancelación se muestra el saldo total que tenía y con cuánto cancela:
+    // sin el punto de partida, el descuento no se entiende.
+    const lineaSaldo = (cManual === 1 && base > total)
+      ? `🧾 *Saldo total adeudado:* ${formatARS(base)}\n`
+      : '';
     detalle = cManual === 1
-      ? `💰 *Monto único:* ${formatARS(total)}`
+      ? `${lineaSaldo}💰 *Monto único:* ${formatARS(total)}`
       : `💰 *Total a pagar:* ${formatARS(total)}\n📅 *${cManual} cuotas de ${formatARS(total / cManual)}*`;
   }
 
@@ -1237,7 +1242,7 @@ function copiarPropuestaCombinada() {
 Le escribe ${operador}, del Estudio CO-RE, a cargo de la gestión extrajudicial de su deuda con Banco Galicia.
 
 ${bloqueProductos}Detalle del saldo al ${hoy}:
-Capital adeudado: ${formatARS(deuda)}
+Saldo actual: ${formatARS(deuda)}
 Honorarios de gestión (incluyen IVA): ${formatARS(honorarios)}
 *Saldo total a cancelar: ${formatARS(base)}*
 
@@ -1603,9 +1608,19 @@ function generarTextoWhatsApp(cuotas) {
     ? `🏷️ Descuento aplicado: *${plan.porcentaje}%*\n`
     : (cuotas > 1 ? `🏷️ Financiación en *${cuotas} cuotas sin interés* (tasa 0%)\n` : '');
 
+  // Saldo total antes de la quita (deuda + honorarios). Viene de calcularPlan;
+  // si por algún flujo no estuviera, se reconstruye desde la deuda cargada.
+  const saldoTotalPrevio = plan.deudaConHonorarios
+    ?? (estadoActual.deuda ? estadoActual.deuda * 1.242 : null);
+
   let cuotasDetalle = "";
   if (cuotas === 1) {
-    cuotasDetalle = `💰 *Monto único:* ${formatARS(plan.montoRecuperar)}`;
+    // En cancelación se muestra el saldo total que tenía y con cuánto cancela:
+    // sin el punto de partida, el descuento no se entiende.
+    const lineaSaldo = (saldoTotalPrevio && saldoTotalPrevio > plan.montoRecuperar)
+      ? `🧾 *Saldo total adeudado:* ${formatARS(saldoTotalPrevio)}\n`
+      : '';
+    cuotasDetalle = `${lineaSaldo}💰 *Monto único:* ${formatARS(plan.montoRecuperar)}`;
   } else {
     cuotasDetalle =
       `💰 *Monto total a regularizar:* ${formatARS(plan.montoRecuperar)}\n` +
