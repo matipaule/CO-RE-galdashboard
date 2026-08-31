@@ -2056,7 +2056,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(71, 85, 105);
     doc.setFontSize(7.5);
     doc.text("Enviar comprobantes a: cobranzasgalicia@co-re.com.ar", M + 6, y + 18);
-    doc.text("Certificado de cancelación emitido a los 15 días de efectivizados los pagos.", M + 6, y + 22.5);
+    doc.text("Certificado de cancelación emitido a los 15 días de efectivizado el pago. El BCRA será regularizado dentro de los 30 días siguientes.", M + 6, y + 22.5);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(15, 23, 42);
     doc.text("Consultas: 0800-345-9707  ·  WhatsApp: 11-5897-7596  ·  www.co-re.com.ar", M + 6, y + 27);
