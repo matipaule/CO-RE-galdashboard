@@ -572,12 +572,15 @@ function calcularPlan(deudaTotalOriginal, cuotas, porcentajeDescuento) {
   // 1. A la deuda original del sistema, se le suman honorarios e IVA (20% + 21% = 24.2%)
   const deudaConHonorarios = deudaTotalOriginal * 1.242;
   
-  // 2. Aplicamos la quita sobre esa deuda total engrosada
-  const montoRecuperar = deudaConHonorarios * (1 - porcentajeDescuento);
-  const valorCuota     = montoRecuperar / cuotas;
+  // 2. Aplicamos la quita y cerramos cada cuota en pesos enteros hacia arriba.
+  // El total se deriva de las cuotas para que la propuesta nunca quede por debajo
+  // de la pauta por redondeo y para que cuota x cantidad coincida con el total.
+  const montoRecuperarExacto = deudaConHonorarios * (1 - porcentajeDescuento);
+  const valorCuota           = Math.ceil(montoRecuperarExacto / cuotas);
+  const montoRecuperar       = valorCuota * cuotas;
   
-  // 3. Calculamos cuánto se le perdona (sobre el número inflado)
-  const montoDescuento = deudaConHonorarios * porcentajeDescuento;  
+  // 3. La quita informada refleja el total final ya ajustado.
+  const montoDescuento = Math.max(0, deudaConHonorarios - montoRecuperar);
   const porcentaje     = Math.round(porcentajeDescuento * 100);  
   
   // 4. Honorario Banco (16% sobre el monto final a recuperar)
