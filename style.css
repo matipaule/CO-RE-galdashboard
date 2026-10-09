@@ -1908,7 +1908,7 @@ body {
   display: block;
 }
 .manual-valid-msg.error { color: #f87171; }
-.manual-valid-msg.ok    { color: #4ade80; display: none; }
+.manual-valid-msg.ok    { color: #4ade80; display: block; }
 .preview-alerta {
   background: rgba(239,68,68,0.12);
   color: #f87171;
@@ -2161,7 +2161,7 @@ body {
 }
 .tabla-esc-sub {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-style: italic;
 }
 .tabla-esc-ref-row {
@@ -2172,6 +2172,23 @@ body {
   border-bottom: 1px solid rgba(251,191,36,0.15);
 }
 .tabla-esc-table-wrap { overflow-x: auto; }
+.politica-banner { margin-bottom: 24px; padding: 18px 22px; border: 1px solid var(--accent); border-radius: 12px; background: rgba(234,88,12,.06); }
+.politica-banner strong { color: var(--accent-light); }
+.politica-banner p { margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.politica-banner .politica-error { color: #f87171; font-weight: 600; }
+.acuerdos-card { margin: 24px 0; padding: 24px; }
+.acuerdos-card .section-title { font-size: 20px; }
+.acuerdos-card .section-subtitle { color: var(--text-secondary); text-transform: none; letter-spacing: normal; line-height: 1.6; }
+.acuerdos-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; margin-top: 20px; }
+.acuerdos-grid > div { padding: 18px; border: 1px solid var(--border); border-radius: 10px; }
+.acuerdos-grid h3 { font-size: 15px; margin: 0 0 10px; }
+.acuerdos-grid p { font-size: 12px; color: var(--text-secondary); line-height: 1.6; min-height: 45px; }
+.acuerdos-grid .form-label { margin-top: 12px; }
+.acuerdos-grid .btn-primary { margin-top: 16px; width: 100%; }
+.acuerdo-resultados { margin-top: 18px; }
+.acuerdo-resultados p { margin: 8px 0; }
+.acuerdo-resultados .plan-actions { margin-top: 16px; }
+@media (max-width: 700px) { .acuerdos-grid { grid-template-columns: 1fr; } .politica-banner, .acuerdos-card { padding: 16px; } }
 .tabla-esc-table {
   width: 100%;
   border-collapse: collapse;

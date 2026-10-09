@@ -74,6 +74,13 @@
   <!-- ═══════════════════════════════════════════════════ MAIN CONTENT -->
   <main class="main-content" id="mainContent">
 
+    <aside class="politica-banner" aria-label="Pautas de gestión vigentes">
+      <strong>Pautas Galicia · 7 al 31 de octubre de 2026</strong>
+      <p>Individuos y PyMEs · Quitas sobre deuda financiera: hasta 85% contado, 80% hasta 3 pagos con primera cuota en octubre y 60% hasta 6 pagos. Hasta 9 pagos sólo con deuda mayor a $20 millones.</p>
+      <p>Acuerdos: hasta 24 meses con TNA 0%, desde $10 millones de deuda financiera y 630 días de mora (ambos inclusive).</p>
+      <p id="politicaEstado" role="status"></p>
+    </aside>
+
     <!-- ─────────────────────────────── SECTION: CALCULADORA -->
     <section class="section" id="section-calculadora">
 
@@ -117,7 +124,7 @@
 
           <div class="form-group">
             <label class="form-label" for="inputDeuda">
-              Saldo Deuda Banco <span class="label-required">*</span>
+              Deuda financiera Banco <span class="label-required">*</span>
             </label>
             <div class="input-prefix-wrap">
               <span class="input-prefix">$</span>
@@ -134,6 +141,15 @@
                      readonly placeholder="0,00" tabindex="-1" />
             </div>
           </div>
+          <div class="form-group">
+            <label class="form-label" for="inputPrimeraCuota">Fecha del primer pago <span class="label-required">*</span></label>
+            <input type="date" id="inputPrimeraCuota" class="form-input" onchange="actualizarLivePreview()" />
+            <span class="vencimiento-hint">Planes de 2 o 3 pagos: primera cuota en octubre de 2026.</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="inputMora">Días de mora</label>
+            <input type="number" id="inputMora" class="form-input" min="0" step="1" placeholder="Necesario para TNA 0%" oninput="actualizarLivePreview()" />
+          </div>
         </div>
 
         <!-- VENCIMIENTO DE PROPUESTA -->
@@ -142,7 +158,7 @@
             📅 Vencimiento de propuesta
           </label>
           <input type="date" id="inputVencimiento" class="vencimiento-input" />
-          <span class="vencimiento-hint">Sin fecha → 48 hs hábiles automático</span>
+          <span class="vencimiento-hint">Sin fecha → 48 hs hábiles, con tope 31/10/2026</span>
           <button class="btn-clear-venc" onclick="document.getElementById('inputVencimiento').value=''" type="button">✕</button>
         </div>
 
@@ -199,7 +215,7 @@
         <div id="tablaEscenariosWrap" class="tabla-esc-wrap" style="display:none;">
           <div class="tabla-esc-header">
             <span class="tabla-esc-title">📋 Tabla de escenarios</span>
-            <span class="tabla-esc-sub">Importes por cuota según % de quita · click en una fila para calcular</span>
+            <span class="tabla-esc-sub">Importes por cuota según % de quita · click en una celda para seleccionar</span>
           </div>
           <div id="tablaEscRefRow" class="tabla-esc-ref-row" style="display:none;">
             <span id="tablaEscRefLabel"></span>
@@ -211,7 +227,7 @@
             </table>
           </div>
           <p class="tabla-esc-nota">
-            🟢 Potable · 🟡 No recomendable · 🔴 No rentable (cuota &lt;$400K) · ⬜ Fuera de límite · 🔒 Política interna (&lt;$250K → max 20%)
+            Importes por cuota, con honorarios incluidos. ⬜ Fuera de pauta. Primera cuota de planes de hasta 3 pagos: octubre de 2026. Quita máxima: 85% / 80% / 60%.
           </p>
         </div>
 
@@ -243,7 +259,7 @@
           <div class="plan-header">
             <div class="plan-badge">Contado</div>
             <div class="plan-title">1 Pago</div>
-            <div class="plan-discount" id="descuentoDisplay1">70% OFF</div>
+            <div class="plan-discount" id="descuentoDisplay1">85% OFF</div>
           </div>
           <div class="plan-body">
             <!-- Cadena de cálculo -->
@@ -300,7 +316,7 @@
           <div class="plan-header">
             <div class="plan-badge">Cuotas</div>
             <div class="plan-title">3 Pagos</div>
-            <div class="plan-discount" id="descuentoDisplay3">65% OFF</div>
+            <div class="plan-discount" id="descuentoDisplay3">80% OFF</div>
           </div>
           <div class="plan-body">
             <!-- Cadena de cálculo -->
@@ -445,6 +461,21 @@
 
 
 
+      <div class="card acuerdos-card">
+        <h2 class="section-title">Acuerdos de plazo extendido</h2>
+        <p class="section-subtitle">Usan la deuda financiera, fecha del primer pago y días de mora cargados arriba. Los acuerdos se muestran sin quita.</p>
+        <div class="acuerdos-grid">
+          <div>
+            <h3>Hasta 24 meses · TNA 0%</h3>
+            <p id="acuerdoCeroEstado">Requiere deuda financiera desde $10 millones y mora desde 630 días (ambos inclusive).</p>
+            <label class="form-label" for="acuerdoMeses0">Meses (1 a 24)</label>
+            <input type="number" id="acuerdoMeses0" class="form-input" min="1" max="24" step="1" value="24" />
+            <button type="button" class="btn-primary" onclick="calcularAcuerdoDesdeFormulario('acuerdo0')">Calcular acuerdo TNA 0%</button>
+          </div>
+        </div>
+        <div id="acuerdoResultados" class="acuerdo-resultados" aria-live="polite"></div>
+      </div>
+
       <!-- GUIA DE CIERRE GALICIA -->
       <div class="guia-panel" id="guiaPanel">
         <div class="guia-header">
@@ -459,7 +490,7 @@
             <div class="guia-num">01</div>
             <div class="guia-content">
               <div class="guia-tag">URGENCIA + CIERRE</div>
-              <p>"Sr/a, Galicia autorizó una quita histórica, pero vence mañana. ¿Transfiere por Alias o CBU?"</p>
+              <p>"Sr/a, estas pautas están vigentes hasta el 31 de octubre. ¿Qué alternativa le resulta posible?"</p>
             </div>
           </div>
           <div class="guia-item">
@@ -502,11 +533,18 @@
             <input type="text" id="manualDni" class="form-input" placeholder="DNI sin puntos" />
           </div>
           <div class="form-group">
-            <label class="form-label" for="manualDeuda">Deuda Total Original ($)</label>
+            <label class="form-label" for="manualDeuda">Deuda financiera original ($)</label>
             <div class="input-prefix-wrap">
               <span class="input-prefix">$</span>
               <input type="number" id="manualDeuda" class="form-input with-prefix" step="0.01" placeholder="0.00" />
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="manualModalidad">Modalidad del acuerdo</label>
+            <select id="manualModalidad" class="form-input form-select" onchange="actualizarModalidadManual()">
+              <option value="quita">Quita · hasta 9 pagos según deuda</option>
+              <option value="acuerdo0">Acuerdo · hasta 24 meses · TNA 0%</option>
+            </select>
           </div>
           <div class="form-group" id="grpManualCuotas">
             <label class="form-label" for="manualCuotas">Cuotas</label>
@@ -517,6 +555,9 @@
               <option value="4">4 Pagos</option>
               <option value="5">5 Pagos</option>
               <option value="6">6 Pagos</option>
+              <option value="7">7 Pagos</option>
+              <option value="8">8 Pagos</option>
+              <option value="9">9 Pagos</option>
             </select>
           </div>
           <div class="form-group">
@@ -531,12 +572,20 @@
             <span id="manualValidMsg" class="manual-valid-msg"></span>
           </div>
           <div class="form-group">
+            <label class="form-label" for="manualPrimeraCuota">Fecha del primer pago <span class="label-required">*</span></label>
+            <input type="date" id="manualPrimeraCuota" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="manualMora">Días de mora</label>
+            <input type="number" id="manualMora" class="form-input" min="0" step="1" placeholder="Necesario para TNA 0%" />
+          </div>
+          <div class="form-group">
             <div class="vencimiento-row">
               <label class="vencimiento-label" for="manualVencimiento">
                 📅 Vencimiento de propuesta
               </label>
               <input type="date" id="manualVencimiento" class="vencimiento-input" />
-              <span class="vencimiento-hint">Sin fecha → 48 hs hábiles automático</span>
+              <span class="vencimiento-hint">Sin fecha → 48 hs hábiles, con tope 31/10/2026</span>
               <button class="btn-clear-venc" onclick="document.getElementById('manualVencimiento').value=''" type="button">✕</button>
             </div>
           </div>
@@ -555,11 +604,11 @@
               <div class="anticipo-modo" style="display:flex; flex-direction:column; gap:6px;">
                 <label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer;">
                   <input type="radio" name="anticipoModo" value="1" checked onchange="actualizarPreviewManual()" style="margin-top:3px;" />
-                  <span><strong>Anticipo a cuenta</strong> <span class="vencimiento-hint">(caso nuevo — el anticipo es la 1ª cuota · máx. 5 cuotas del saldo)</span></span>
+                    <span><strong>Anticipo a cuenta</strong> <span class="vencimiento-hint">(el anticipo es el primer pago; se cuenta para el límite del plan)</span></span>
                 </label>
                 <label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer;">
                   <input type="radio" name="anticipoModo" value="2" onchange="actualizarPreviewManual()" style="margin-top:3px;" />
-                  <span><strong>Seña aparte</strong> <span class="vencimiento-hint">(plan ya pactado — la seña no cuenta · máx. 6 cuotas del saldo)</span></span>
+                    <span><strong>Seña aparte</strong> <span class="vencimiento-hint">(pago inicial aparte; se cuenta para validar la cantidad total de pagos)</span></span>
                 </label>
               </div>
             </div>
@@ -582,6 +631,8 @@
                 <option value="4">4 cuotas</option>
                 <option value="5">5 cuotas</option>
                 <option value="6">6 cuotas</option>
+                <option value="7">7 cuotas</option>
+                <option value="8">8 cuotas</option>
               </select>
               <span class="vencimiento-hint">El total no cambia: se resta el anticipo/seña y el saldo se divide en estas cuotas.</span>
             </div>
@@ -737,6 +788,7 @@
   <!-- Toast notification -->
   <div class="toast" id="toast"></div>
 
+  <script src="politicas.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

@@ -50,37 +50,22 @@ const TIPOS_PRODUCTO = [
 /* ─────────────────────────────────────────────────────────────────
    FORMATEADOR MONETARIO (es-AR, ARS)
    ───────────────────────────────────────────────────────────────── */
-const formatARS = (numero) =>
-  new Intl.NumberFormat("es-AR", {
+const formatARS = (numero) => {
+  const importe = Math.round((Number(numero) || 0) * 100) / 100;
+  return new Intl.NumberFormat("es-AR", {
     style:    "currency",
     currency: "ARS",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Math.round(Number(numero) || 0));
+    minimumFractionDigits: Number.isInteger(importe) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(importe);
+};
 
 /* ─────────────────────────────────────────────────────────────────
    PLANES DE DESCUENTO
    ───────────────────────────────────────────────────────────────── */
-const PLANES = {
-  1: { cuotas: 1, descuento: 0.70, label: "1 Pago (Contado)" },
-  2: { cuotas: 2, descuento: 0.65, label: "2 Pagos" },
-  3: { cuotas: 3, descuento: 0.65, label: "3 Pagos" },
-  4: { cuotas: 4, descuento: 0.60, label: "4 Pagos" },
-  5: { cuotas: 5, descuento: 0.60, label: "5 Pagos" },
-  6: { cuotas: 6, descuento: 0.60, label: "6 Pagos" },
-};
-
-/* ─────────────────────────────────────────────────────────────────
-   ESCALAMIENTOS POR PLAN
-   ───────────────────────────────────────────────────────────────── */
-const ESCALAMIENTOS = {
-  1: [40, 50, 60, 70],
-  2: [40, 50, 60, 70],
-  3: [35, 45, 55, 65],
-  4: [30, 40, 50, 60],
-  5: [30, 40, 50, 60],
-  6: [30, 40, 50, 60],
-};
+const PLANES = Object.fromEntries(Object.entries(POLITICA_GALICIA.limitesQuita).map(([c,descuento]) => [
+  c, {cuotas:Number(c), descuento, label:Number(c) === 1 ? "1 Pago (Contado)" : c+" Pagos"}
+]));
 
 const formatMoney = formatARS;
 
@@ -163,85 +148,70 @@ function getOrCreateOverlay() {
   return overlay;
 }
 
-// Límites de descuento por cuotas (igual que calculadora principal)
-const LIMITES_MANUAL = { 1:0.70, 2:0.65, 3:0.65, 4:0.60, 5:0.60, 6:0.60 };
+function actualizarModalidadManual() {
+  const modalidad = document.getElementById("manualModalidad").value;
+  const deuda = Number(document.getElementById("manualDeuda").value) || 0;
+  const max = modalidad === "acuerdo0" ? POLITICA_GALICIA.mesesAcuerdoCero
+    : cuotasDisponiblesGalicia(deuda).length;
+  ["manualCuotas", "anticipoCuotas"].forEach((id) => {
+    const el = document.getElementById(id), anterior = Number(el.value) || 1;
+    const limite = id === "anticipoCuotas" ? max - 1 : max;
+    el.innerHTML = Array.from({length: limite}, (_, i) => '<option value="' + (i+1) + '">' + (i+1) + ' pago/s</option>').join("");
+    el.value = Math.min(anterior, limite);
+  });
+  actualizarPreviewManual();
+}
+
+function obtenerPlanManualGalicia() {
+  const deuda = Number(document.getElementById("manualDeuda").value);
+  const total = Number(document.getElementById("manualCapital").value);
+  const modalidad = document.getElementById("manualModalidad").value || "quita";
+  const base = deuda * 1.242;
+  const anticipo = esAnticipo() ? getDatosAnticipo(total) : null;
+  const cuotas = anticipo ? anticipo.nCuotas + 1 : Number(document.getElementById("manualCuotas").value);
+  let plan = crearPlanFijoGalicia(total, cuotas);
+  if (anticipo) {
+    if (anticipo.anticipo <= 0 || anticipo.anticipo >= total) throw Error("El anticipo/seña debe ser mayor a $0 y menor al total.");
+    const saldo = crearPlanFijoGalicia((aCentavos(total)-aCentavos(anticipo.anticipo))/100, anticipo.nCuotas);
+    const pagos = [repartirPagoGalicia(anticipo.anticipo), ...saldo.pagos];
+    plan = {...plan, pagos, valorCuota: saldo.valorCuota, ultimaCuota: saldo.ultimaCuota,
+      capitalBanco: pagos.reduce((s,p)=>s+aCentavos(p.banco),0)/100,
+      honorariosAgencia: pagos.reduce((s,p)=>s+aCentavos(p.honorarios),0)/100, anticipo};
+  }
+  return {...plan, modalidad, tna: 0,
+    deudaConHonorarios: base, porcentaje: modalidad === "quita" ? Math.max(0, (1-total/base)*100) : 0,
+    montoDescuento: modalidad === "quita" ? base-total : 0,
+    label: modalidad === "quita" ? cuotas + " Pagos" : "Acuerdo " + cuotas + " meses"};
+}
 
 function actualizarPreviewManual() {
-  const deuda    = parseFloat(document.getElementById("manualDeuda")?.value)   || 0;
-  const capital  = parseFloat(document.getElementById("manualCapital")?.value) || 0;
-  const cuotas   = parseInt(document.getElementById("manualCuotas")?.value, 10) || 1;
-
-  const base     = deuda * 1.242;
-  const total    = capital;            // el monto ingresado ya es el total con honorarios
-  const descPct  = base > 0 ? (1 - total / base) : 0;
-
-  // Cantidad de pagos para el límite de quita: con anticipo/seña usa los pagos reales.
-  const antOn = esAnticipo();
-  let cuotasLimite = cuotas;
-  if (antOn) {
-    const nc   = parseInt(document.getElementById("anticipoCuotas")?.value, 10) || 1;
-    const modo = getModoAnticipo();
-    cuotasLimite = Math.min(6, modo === 1 ? nc + 1 : nc);   // pagos totales que ve el banco
+  const deuda = Number(document.getElementById("manualDeuda")?.value) || 0;
+  const total = Number(document.getElementById("manualCapital")?.value) || 0;
+  let error = "", plan;
+  let deudaValida = true;
+  try { aCentavos(deuda); } catch(e) { deudaValida=false; error=e.message; }
+  if (deudaValida && deuda > 0 && total > 0) {
+    try { plan = obtenerPlanManualGalicia(); error = erroresPlanGalicia(deuda, plan, true).join(" "); }
+    catch (e) { error = e.message; }
   }
-  const maxDesc  = LIMITES_MANUAL[cuotasLimite] ?? 0.65;
-  const maxBase  = base * (1 - maxDesc);
-
-  const hint = document.getElementById("manualDescHint");
-  if (hint && deuda > 0)
-    hint.textContent = `máx. ${Math.round(maxDesc*100)}% de quita → mín. ${formatARS(maxBase)} a pagar`;
-
-  const baseEl  = document.getElementById("previewBase");
-  const descEl  = document.getElementById("previewDesc");
-  const totalEl = document.getElementById("previewTotal");
-  if (baseEl)  baseEl.textContent  = formatARS(base);
-  if (totalEl) totalEl.textContent = formatARS(total);
-  if (descEl)  descEl.textContent  = base > 0 && capital > 0 ? `${Math.round(descPct*100)}% OFF` : "— %";
-
+  const base = deuda * 1.242;
+  document.getElementById("previewBase").textContent = formatARS(base);
+  document.getElementById("previewTotal").textContent = formatARS(total);
+  document.getElementById("previewDesc").textContent = plan ? (plan.modalidad === "quita" ? plan.porcentaje.toFixed(2) + "% OFF" : "TNA " + Math.round(plan.tna*100) + "%") : "—";
+  const modalidad = document.getElementById("manualModalidad").value;
+  const cantidad = plan?.cuotas || Number(document.getElementById("manualCuotas").value);
+  const limite = modalidad === "quita" && deudaValida ? limiteQuitaGalicia(cantidad, deuda) : 0;
+  document.getElementById("manualDescHint").textContent = !deudaValida || deuda <= 0 ? "" : limite != null
+    ? "Máx. " + Math.round(limite*100) + "% de quita · mínimo " + formatARS(minimoTotalGalicia(deuda, limite)/100) : "Cantidad de pagos fuera de pauta.";
+  const res = document.getElementById("anticipoResumen");
+  if (res && plan?.anticipo) res.textContent = detalleCuentaGalicia(plan, "importe") + " = " + formatARS(total);
   const alerta = document.getElementById("previewAlerta");
-  const btn    = document.getElementById("btnGenerarManual");
-  const msg    = document.getElementById("manualValidMsg");
-
-  let error = "";
-  if (base > 0 && capital > 0) {
-    if (total > base + 0.01) error = "⚠️ El monto acordado supera la deuda con honorarios.";
-    else if (descPct > maxDesc + 0.001)
-      error = `⚠️ Quita de ${Math.round(descPct*100)}% supera el límite de ${Math.round(maxDesc*100)}% para ${cuotasLimite} pago/s.`;
-  }
-
-  // Resumen y validación del anticipo/seña
-  if (antOn && capital > 0) {
-    const d = getDatosAnticipo(total);
-    const res = document.getElementById("anticipoResumen");
-    const etiqueta = d.modo === 2 ? "Seña" : "Anticipo (1ª cuota)";
-    let claseRes = "anticipo-resumen ok", txtRes = "";
-
-    if (d.anticipo <= 0) {
-      txtRes = "Ingresá el monto del anticipo / seña."; claseRes = "anticipo-resumen warn";
-    } else if (d.anticipo >= total) {
-      txtRes = "⚠️ El anticipo / seña no puede ser igual o mayor al total.";
-      claseRes = "anticipo-resumen error";
-      if (!error) error = txtRes;
-    } else if (d.nCuotas > d.maxPorModo) {
-      txtRes = `⚠️ En este modo el máximo es ${d.maxPorModo} cuotas del saldo.`;
-      claseRes = "anticipo-resumen error";
-      if (!error) error = txtRes;
-    } else if (d.estado === 'bloqueado') {
-      txtRes = `⚠️ ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)} queda debajo del mínimo de ${formatARS(d.piso)}. Bajá a ${d.maxCuotas > 0 ? "máx " + d.maxCuotas + " cuota/s" : "1 cuota o subí la seña"}.`;
-      claseRes = "anticipo-resumen error";
-      if (!error) error = txtRes;
-    } else {
-      const flag = d.estado === 'no_recomendable'
-        ? `  ⚠️ Cuota no recomendable (menor a ${formatARS(d.recomendable)}). Ideal: hasta ${d.maxCuotas} cuota/s.`
-        : `  ✓ Recomendable.`;
-      txtRes = `${etiqueta}: ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}  =  ${formatARS(total)}.${flag}`;
-      claseRes = d.estado === 'no_recomendable' ? "anticipo-resumen warn" : "anticipo-resumen ok";
-    }
-    if (res) { res.textContent = txtRes; res.className = claseRes; }
-  }
-
-  if (alerta) { alerta.textContent = error; alerta.style.display = error ? "block" : "none"; }
-  if (msg)    { msg.textContent = error; msg.className = error ? "manual-valid-msg error" : "manual-valid-msg ok"; }
-  if (btn)    btn.disabled = Boolean(error) && base > 0 && capital > 0;
+  alerta.textContent = error; alerta.style.display = error ? "block" : "none";
+  const msg = document.getElementById("manualValidMsg");
+  msg.textContent = error || (plan ? detalleCuentaGalicia(plan, "importe") : "");
+  msg.className = error ? "manual-valid-msg error" : "manual-valid-msg ok";
+  document.getElementById("btnGenerarManual").disabled = Boolean(error) || !plan;
+  document.getElementById("btnTextoManual").disabled = Boolean(error) || !plan;
 }
 
 function toggleAnticipo() {
@@ -256,37 +226,17 @@ function toggleAnticipo() {
 
 function esAnticipo() { return document.getElementById("anticipoCheck")?.checked || false; }
 
-// Modo 1 = anticipo a cuenta (cuenta como 1ª cuota, máx 5 del saldo)
-// Modo 2 = seña aparte (no cuenta, máx 6 del saldo)
+// Ambos pagos iniciales cuentan dentro del máximo de pagos de la nueva pauta.
 function getModoAnticipo() {
   return document.querySelector('input[name="anticipoModo"]:checked')?.value === '2' ? 2 : 1;
 }
 
 function getDatosAnticipo(totalConHon) {
-  const anticipo = parseFloat(document.getElementById("anticipoMonto")?.value) || 0;
-  const modo     = getModoAnticipo();
-  const nCuotas  = parseInt(document.getElementById("anticipoCuotas")?.value, 10) || 1;
-  const deuda    = parseFloat(document.getElementById("manualDeuda")?.value) || 0;
-  const base     = deuda * 1.242;
-
-  // El total NO cambia: se resta el anticipo/seña y el saldo se divide en las cuotas.
-  const saldo      = totalConHon - anticipo;
-  const cuotaValor = (saldo > 0 && nCuotas > 0) ? saldo / nCuotas : 0;
-
-  // Umbrales del banco (mismos que la tabla de escenarios), según haya o no quita.
-  const hayQuita     = base > 0 && (1 - totalConHon / base) > 0.005;
-  const piso         = hayQuita ? 250000 : 150000;   // debajo = no permitido
-  const recomendable = hayQuita ? 400000 : 250000;   // debajo = permitido pero no recomendable
-
-  const maxPorModo = modo === 2 ? 6 : 5;
-  const maxPorPiso = saldo > 0 ? Math.floor(saldo / piso) : 0;
-  const maxCuotas  = Math.min(maxPorModo, maxPorPiso);   // puede dar 0 si el saldo es muy chico
-
-  let estado = 'ok';
-  if (cuotaValor > 0 && cuotaValor < piso)               estado = 'bloqueado';
-  else if (cuotaValor > 0 && cuotaValor < recomendable)  estado = 'no_recomendable';
-
-  return { modo, anticipo, nCuotas, saldo, cuotaValor, piso, recomendable, maxPorModo, maxCuotas, estado, hayQuita };
+  const anticipo = Number(document.getElementById("anticipoMonto").value) || 0;
+  const nCuotas = Number(document.getElementById("anticipoCuotas").value) || 1;
+  const saldo = (aCentavos(totalConHon) - aCentavos(anticipo))/100;
+  return {modo: getModoAnticipo(), anticipo, nCuotas, saldo,
+    cuotaValor: saldo > 0 ? Math.floor(aCentavos(saldo)/nCuotas)/100 : 0};
 }
 
 function agregarProductoManual(tipo = "", numero = "") {
@@ -315,176 +265,26 @@ function obtenerProductosManuales() {
   return productos;
 }
 
-function generarPdfManual() {
+function datosEmisionManual() {
   const nombre = document.getElementById("manualNombre").value.trim();
   const dni = document.getElementById("manualDni").value.trim();
-  const deuda = parseFloat(document.getElementById("manualDeuda").value) || 0;
-  const cuotas = parseInt(document.getElementById("manualCuotas").value, 10) || 1;
-  const capital = parseFloat(document.getElementById("manualCapital").value) || 0;
-
-  if (!nombre) {
-    alert("⚠️ Completá Nombre y Apellido.");
-    document.getElementById("manualNombre").focus();
-    return;
-  }
-  if (!dni) {
-    alert("⚠️ Completá DNI.");
-    document.getElementById("manualDni").focus();
-    return;
-  }
-  if (deuda <= 0) {
-    alert("⚠️ Ingresá una deuda total válida.");
-    document.getElementById("manualDeuda").focus();
-    return;
-  }
-  if (capital <= 0) {
-    alert("⚠️ Ingresá el monto acordado a pagar.");
-    document.getElementById("manualCapital").focus();
-    return;
-  }
-
-  // El monto ingresado ya es el TOTAL final con honorarios incluidos.
-  const base    = deuda * 1.242;
-  const total   = capital;
-  const descPct = base > 0 ? (1 - total / base) : 0;
-
-  const antOn = esAnticipo();
-  let anticipoData = null;
-  let cuotasLimite = cuotas;   // pagos que ve el banco (para el límite de quita)
-
-  if (antOn) {
-    const d = getDatosAnticipo(total);
-    cuotasLimite = Math.min(6, d.modo === 1 ? d.nCuotas + 1 : d.nCuotas);
-    if (d.anticipo <= 0 || d.anticipo >= total) {
-      alert("⚠️ El anticipo / seña debe ser mayor a $0 y menor al total.");
-      return;
-    }
-    if (d.nCuotas > d.maxPorModo) {
-      alert(`⚠️ En este modo el máximo es ${d.maxPorModo} cuotas del saldo.`);
-      return;
-    }
-    if (d.estado === 'bloqueado') {
-      alert(`⚠️ Cada cuota (${formatARS(d.cuotaValor)}) queda por debajo del mínimo de ${formatARS(d.piso)}. Bajá la cantidad de cuotas${d.maxCuotas > 0 ? ` (máx ${d.maxCuotas})` : ""} o subí la seña.`);
-      return;
-    }
-    anticipoData = d;
-  }
-
-  const maxDesc = LIMITES_MANUAL[cuotasLimite] ?? 0.65;
-  if (descPct > maxDesc + 0.001) {
-    alert(`⚠️ La quita efectiva es ${Math.round(descPct*100)}%, supera el límite de ${Math.round(maxDesc*100)}% para ${cuotasLimite} pago/s.`);
-    return;
-  }
-
-  generateAgreementPDF({
-    nombre, dni,
-    deudaOriginal: deuda,
-    cuotas: antOn ? cuotasLimite : cuotas,
-    capitalAcordado: capital,
-    productos: obtenerProductosManuales(),
-    anticipo: anticipoData,
-  });
+  const deuda = Number(document.getElementById("manualDeuda").value);
+  if (!nombre || !dni || !(deuda > 0)) { alert("Completá nombre, DNI y deuda financiera válida."); return null; }
+  let plan;
+  try { plan = obtenerPlanManualGalicia(); } catch (e) { alert(e.message); return null; }
+  if (!autorizarEmisionGalicia(deuda, plan, true)) return null;
+  return {nombre, dni, deudaOriginal: deuda, cuotas: plan.cuotas,
+    capitalAcordado: plan.montoRecuperar, plan, productos: obtenerProductosManuales(), anticipo: plan.anticipo};
 }
 
-// Genera el TEXTO de la propuesta (estilo WhatsApp) desde la emisión manual.
+function generarPdfManual() {
+  const datos = datosEmisionManual();
+  if (datos) generateAgreementPDF(datos);
+}
+
 function generarTextoManual() {
-  const nombre = document.getElementById("manualNombre")?.value?.trim() || "";
-  const dni    = document.getElementById("manualDni")?.value?.trim()    || "";
-  const deuda  = parseFloat(document.getElementById("manualDeuda")?.value)   || 0;
-  const capital= parseFloat(document.getElementById("manualCapital")?.value) || 0;
-
-  if (!nombre)      { alert("⚠️ Completá Nombre y Apellido."); return; }
-  if (!dni)         { alert("⚠️ Completá DNI."); return; }
-  if (deuda <= 0)   { alert("⚠️ Ingresá una deuda total válida."); return; }
-  if (capital <= 0) { alert("⚠️ Ingresá el monto acordado a pagar."); return; }
-
-  const base  = deuda * 1.242;
-  const total = capital;
-  const pctQuita = base > 0 ? Math.round((1 - total / base) * 100) : 0;
-  const capitalBanco = total / 1.242;
-  const honorarios   = total - capitalBanco;
-
-  const hoy  = new Date().toLocaleDateString("es-AR", { day:"2-digit", month:"2-digit", year:"numeric" });
-  const venc = getVencimientoPDF('manualVencimiento');
-
-  const cManual = parseInt(document.getElementById("manualCuotas")?.value, 10) || 1;
-  const antOn   = esAnticipo();
-  let d = null;
-  if (antOn) {
-    d = getDatosAnticipo(total);
-    if (d.anticipo <= 0 || d.anticipo >= total) { alert("⚠️ El anticipo / seña debe ser mayor a $0 y menor al total."); return; }
-    if (d.nCuotas > d.maxPorModo)  { alert(`⚠️ En este modo el máximo es ${d.maxPorModo} cuotas del saldo.`); return; }
-    if (d.estado === 'bloqueado')  { alert(`⚠️ Cada cuota (${formatARS(d.cuotaValor)}) queda por debajo del mínimo de ${formatARS(d.piso)}. Bajá las cuotas o subí la seña.`); return; }
-  }
-
-  // Etiqueta, condición y detalle
-  let label, condicion = "", detalle;
-  if (antOn) {
-    const etq = d.modo === 2 ? "Seña" : "Anticipo (1ª cuota)";
-    label   = `${d.modo === 2 ? "SEÑA" : "ANTICIPO"} + ${d.nCuotas} ${d.nCuotas === 1 ? "CUOTA" : "CUOTAS"}`;
-    if (pctQuita > 0)      condicion = `🏷️ Descuento aplicado: *${pctQuita}%*\n`;
-    else if (d.nCuotas > 1) condicion = `🏷️ Financiación sin interés (tasa 0%)\n`;
-    detalle = `💰 *Total a pagar:* ${formatARS(total)}\n📅 ${etq}: ${formatARS(d.anticipo)}  +  ${d.nCuotas} cuota/s de ${formatARS(d.cuotaValor)}`;
-  } else {
-    label   = cManual === 1 ? "PAGO CONTADO" : `${cManual} CUOTAS`;
-    if (pctQuita > 0)       condicion = `🏷️ Descuento aplicado: *${pctQuita}%*\n`;
-    else if (cManual > 1)   condicion = `🏷️ Financiación sin interés (tasa 0%)\n`;
-    // En cancelación se muestra el saldo total que tenía y con cuánto cancela:
-    // sin el punto de partida, el descuento no se entiende.
-    const lineaSaldo = (cManual === 1 && base > total)
-      ? `🧾 *Saldo total adeudado:* ${formatARS(base)}\n`
-      : '';
-    detalle = cManual === 1
-      ? `${lineaSaldo}💰 *Monto único:* ${formatARS(total)}`
-      : `💰 *Total a pagar:* ${formatARS(total)}\n📅 *${cManual} cuotas de ${formatARS(total / cManual)}*`;
-  }
-
-  // Reparto por cuenta (÷1,242)
-  let impBanco, impHon;
-  if (antOn) {
-    const antB = d.anticipo / 1.242, cB = d.cuotaValor / 1.242;
-    const antH = d.anticipo - antB, cH = d.cuotaValor - cB;
-    const etq = d.modo === 2 ? "Seña" : "Anticipo";
-    impBanco = `${etq} ${formatARS(antB)} + ${d.nCuotas} de ${formatARS(cB)}`;
-    impHon   = `${etq} ${formatARS(antH)} + ${d.nCuotas} de ${formatARS(cH)}`;
-  } else {
-    impBanco = cManual > 1 ? `${formatARS(capitalBanco / cManual)} x ${cManual} cuotas` : formatARS(capitalBanco);
-    impHon   = cManual > 1 ? `${formatARS(honorarios / cManual)} x ${cManual} cuotas`   : formatARS(honorarios);
-  }
-
-  const prods = obtenerProductosManuales().filter(p => p.tipo !== 'Honorarios de Gestión Extrajudicial');
-  const productosLista = prods.length
-    ? prods.map((p, i) => `${i + 1}. ${p.tipo}${p.numero ? `  N° ${p.numero}` : ''}`).join('\n')
-    : '(según acuerdo)';
-
-  const nombreDisplay = ` *${nombre.toUpperCase()}*`;
-  const dniDisplay    = ` (DNI: ${dni})`;
-
-  const texto =
-`🏦 *BANCO GALICIA — Regularización de Deuda*
-📋 Mora Tardía · Extrajudicial
-📆 Emisión: ${hoy} · Vence: ${venc}
-
-Estimado/a${nombreDisplay}${dniDisplay},
-Le acercamos la siguiente *propuesta de pago* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*. Sujeta a su confirmación.
-
-📌 *PROPUESTA DE PAGO: ${label}*
-${condicion}${detalle}
-
-📦 *Productos incluidos:*
-${productosLista}
-
-🏧 *DATOS DE PAGO* — total ${formatARS(total)}, en 2 cuentas:
-1) Capital → Banco Galicia · GALICIALEG · CBU 0070686120000002247308
-Importe: *${impBanco}*
-2) Honorarios 20%+IVA → Estudio CO-RE · GALICIAHONORARIOS · CBU 0070999030004062897261
-Importe: *${impHon}*
-_Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal._
-
-⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
-
-  copiarTexto(texto);
-  mostrarToast("💬 Propuesta (texto) copiada", "success");
+  const datos = datosEmisionManual();
+  if (datos) copiarTexto(crearTextoPropuestaGalicia(datos.plan, {...datos, deuda: datos.deudaOriginal}, true));
 }
 
 function prepararPDF(nombre, dni, producto, deuda, cuotas, capitalAcordado) {
@@ -492,20 +292,11 @@ function prepararPDF(nombre, dni, producto, deuda, cuotas, capitalAcordado) {
 }
 
 function initManualListeners() {
-  const manualCapital = document.getElementById("manualCapital");
-  if (!manualCapital) return;
-  manualCapital.addEventListener("input", () => {
-    const capital = parseFloat(manualCapital.value) || 0;
-    const had = calcularHAD(capital);
-    const total = capital + had;
-    document.getElementById("previewHad").innerText = formatMoney(had);
-    document.getElementById("previewTotal").innerText = formatMoney(total);
+  ["manualCapital","manualDeuda","manualCuotas","manualPrimeraCuota","manualMora","manualVencimiento","anticipoMonto","anticipoCuotas"].forEach(id => {
+    document.getElementById(id)?.addEventListener("input", actualizarPreviewManual);
   });
+  document.getElementById("manualDeuda")?.addEventListener("change", actualizarModalidadManual);
 }
-
-/* ─────────────────────────────────────────────────────────────────
-   TOAST NOTIFICATION
-   ───────────────────────────────────────────────────────────────── */
 function mostrarToast(mensaje, tipo = "success") {
   const toast = document.getElementById("toast");
   toast.textContent = mensaje;
@@ -550,47 +341,92 @@ async function copiarTexto(texto, boton = null) {
    PARSEAR NÚMERO DESDE INPUT
    ───────────────────────────────────────────────────────────────── */
 function parsearNumero(str) {
-  if (!str || str.trim() === "") return NaN;
-  let limpio = str.trim().replace(/\s/g, "").replace(/\$/g, "");
-  if (limpio.includes(".") && limpio.includes(",")) {
-    limpio = limpio.replace(/\./g, "").replace(",", ".");
-  } else if (limpio.includes(",") && !limpio.includes(".")) {
-    const partes = limpio.split(",");
-    if (partes[1] && partes[1].length !== 2 && partes[1].length !== 1) {
-      limpio = limpio.replace(",", "");
-    } else {
-      limpio = limpio.replace(",", ".");
-    }
+  if (typeof str !== "string") return NaN;
+  let limpio = str.trim().replace(/\s/g,"").replace(/\$/g,"");
+  if (limpio.includes(",")) {
+    if (!/^\d+(?:\.\d{3})*,\d{1,2}$/.test(limpio)) return NaN;
+    limpio = limpio.replace(/\./g,"").replace(",",".");
+  } else if (/^\d{1,3}(?:\.\d{3})+$/.test(limpio)) {
+    limpio = limpio.replace(/\./g,"");
   }
-  return parseFloat(limpio);
+  return /^\d+(?:\.\d{1,2})?$/.test(limpio) ? Number(limpio) : NaN;
+}
+function calcularPlan(deudaTotalOriginal, cuotas, porcentajeDescuento) {
+  return calcularPlanGalicia(deudaTotalOriginal, cuotas, porcentajeDescuento);
 }
 
-/* ─────────────────────────────────────────────────────────────────
-CALCULAR RESULTADOS PARA UN PLAN (Actualizado con honorarios 1,242)
-───────────────────────────────────────────────────────────────── */
-function calcularPlan(deudaTotalOriginal, cuotas, porcentajeDescuento) {
-  // 1. A la deuda original del sistema, se le suman honorarios e IVA (20% + 21% = 24.2%)
-  const deudaConHonorarios = deudaTotalOriginal * 1.242;
-  
-  // 2. Aplicamos la quita y cerramos cada cuota en pesos enteros hacia arriba.
-  // El total se deriva de las cuotas para que la propuesta nunca quede por debajo
-  // de la pauta por redondeo y para que cuota x cantidad coincida con el total.
-  const montoRecuperarExacto = deudaConHonorarios * (1 - porcentajeDescuento);
-  const valorCuota           = Math.ceil(montoRecuperarExacto / cuotas);
-  const montoRecuperar       = valorCuota * cuotas;
-  
-  // 3. La quita informada refleja el total final ya ajustado.
-  const montoDescuento = Math.max(0, deudaConHonorarios - montoRecuperar);
-  const porcentaje     = Math.round(porcentajeDescuento * 100);  
-  
-  // 4. Honorario Banco (16% sobre el monto final a recuperar)
-  const hab            = montoRecuperar * 0.16;  
-  
-  // 5. El honorario agencia (HAD) ahora es la porción del 24,2% contenida en el nuevo saldo
-  const capitalLimpio  = montoRecuperar / 1.242;
-  const had            = montoRecuperar - capitalLimpio; 
-  
-  return { montoRecuperar, valorCuota, montoDescuento, porcentaje, hab, had, deudaConHonorarios };
+function contextoPoliticaGalicia(manual = false) {
+  const prefijo = manual ? "manual" : "input";
+  const mora = document.getElementById(`${prefijo}Mora`)?.value;
+  return {
+    fecha: hoyArgentina(),
+    primeraCuota: document.getElementById(`${prefijo}PrimeraCuota`)?.value || "",
+    moraDias: mora === "" || mora == null ? null : Number(mora),
+    vencimiento: document.getElementById(`${prefijo}Vencimiento`)?.value || null,
+  };
+}
+
+function actualizarEstadoPolitica() {
+  const fecha = hoyArgentina();
+  const vigente = fecha >= POLITICA_GALICIA.desde && fecha <= POLITICA_GALICIA.hasta;
+  const el = document.getElementById("politicaEstado");
+  el.textContent = vigente ? "Pautas vigentes · Individuos y PyMEs · hasta 31/10/2026." : "Pautas fuera de vigencia. La emisión está bloqueada hasta actualizar la política.";
+  el.className = vigente ? "" : "politica-error";
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  const mora = contextoPoliticaGalicia().moraDias;
+  document.getElementById("acuerdoCeroEstado").textContent = deuda >= POLITICA_GALICIA.deudaAcuerdoCero && Number.isInteger(mora) && mora >= POLITICA_GALICIA.moraAcuerdoCero
+    ? "Cumple deuda y mora para TNA 0%." : "Requiere deuda financiera desde $10 millones y mora desde 630 días (ambos inclusive).";
+}
+
+function calcularAcuerdoDesdeFormulario(modalidad, emitir = null) {
+  if (modalidad !== "acuerdo0") { alert("Modalidad de acuerdo inválida."); return; }
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  if (!(deuda > 0)) { alert("Ingresá una deuda financiera válida."); return; }
+  const meses = Number(document.getElementById("acuerdoMeses0").value);
+  let plan;
+  try { plan = calcularAcuerdoGalicia(deuda,meses,0); }
+  catch(e) { alert(e.message); return; }
+  if (!autorizarEmisionGalicia(deuda,plan)) return;
+  const estado = estadoFormularioGalicia(deuda);
+  const wrap = document.getElementById("acuerdoResultados");
+  wrap.innerHTML = '<h3>Acuerdo '+meses+' meses · TNA '+Math.round(plan.tna*100)+'%</h3><p>Total: '+formatARS(plan.montoRecuperar)+'</p><p>'+describirPagosGalicia(plan)+'</p><p>Banco: '+detalleCuentaGalicia(plan,"banco")+'<br>Honorarios: '+detalleCuentaGalicia(plan,"honorarios")+'</p>';
+  [["WhatsApp","texto"],["Generar PDF","pdf"]].forEach(([label,tipo]) => {
+    const btn = document.createElement("button");
+    btn.className = "btn-action " + (tipo === "texto" ? "btn-wa" : "btn-pdf");
+    btn.textContent = label;
+    btn.addEventListener("click",()=>calcularAcuerdoDesdeFormulario(modalidad,tipo));
+    wrap.appendChild(btn);
+  });
+  if (emitir === "texto") copiarTexto(crearTextoPropuestaGalicia(plan,estado));
+  if (emitir === "pdf") {
+    if (!estado.nombre || !estado.dni) { alert("Completá nombre y DNI."); return; }
+    generateAgreementPDF(meses,plan,estado);
+  }
+}
+
+function erroresPlanGalicia(deuda, plan, manual = false) {
+  return validarPropuestaGalicia({ deuda, cuotas: plan.cuotas, total: plan.montoRecuperar,
+    modalidad: plan.modalidad || "quita", quitaSolicitada: plan.quitaSolicitada ?? null, ...contextoPoliticaGalicia(manual) });
+}
+
+function autorizarEmisionGalicia(deuda, plan, manual = false) {
+  const errores = erroresPlanGalicia(deuda, plan, manual);
+  if (errores.length) { alert("⚠️ No se puede emitir esta propuesta:\n" + errores.join("\n")); return false; }
+  return true;
+}
+
+function describirPagosGalicia(plan, campo = "importe") {
+  const pagos = plan.pagos;
+  const primero = pagos[0][campo], ultimo = pagos[pagos.length - 1][campo];
+  if (pagos.length === 1) return formatARS(primero);
+  if (aCentavos(primero) === aCentavos(ultimo)) return `${pagos.length} cuotas de ${formatARS(primero)}`;
+  return `${pagos.length - 1} cuota/s de ${formatARS(primero)} y última de ${formatARS(ultimo)}`;
+}
+
+function detalleCuentaGalicia(plan, campo) {
+  if (!plan.anticipo) return describirPagosGalicia(plan, campo);
+  const etiqueta = plan.anticipo.modo === 2 ? "Seña" : "Anticipo";
+  return `${etiqueta} ${formatARS(plan.pagos[0][campo])} + ${describirPagosGalicia({ pagos: plan.pagos.slice(1) }, campo)}`;
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -627,345 +463,113 @@ function actualizarLabelMontoCliente() {
   if (hint) hint.textContent = tipo === 'cuota'
     ? 'El sistema buscará el descuento para cada número de cuotas'
     : 'El sistema calculará el descuento para ese total fijo';
+  document.getElementById("gridInversoWrap").style.display = "none";
 }
 
 function calcularInverso() {
-  const rawDeuda   = document.getElementById('inputDeuda').value.trim();
-  const rawMonto   = document.getElementById('inputMontoCliente').value.trim();
-  const tipo       = document.querySelector('input[name="montoTipo"]:checked')?.value || 'cuota';
-  const dni        = document.getElementById('inputDni').value.trim();
-  const nombre     = document.getElementById('inputNombre').value.trim();
-  const grupo      = "CO";
-
-  if (!rawDeuda) {
-    alert('⚠️ El campo "Saldo Deuda Total" es obligatorio.');
-    document.getElementById('inputDeuda').focus();
-    return;
-  }
-  if (!rawMonto) {
-    alert('⚠️ Ingresá el monto que el cliente puede pagar.');
-    document.getElementById('inputMontoCliente').focus();
-    return;
-  }
-
-  const deuda      = parsearNumero(rawDeuda);
-  const montoInput = parsearNumero(rawMonto);
-
-  if (isNaN(deuda) || deuda <= 0) {
-    alert('⚠️ Deuda inválida.');
-    return;
-  }
-  if (isNaN(montoInput) || montoInput <= 0) {
-    alert('⚠️ Monto del cliente inválido.');
-    return;
-  }
-
-  const base   = deuda * 1.242;
-  const limites = { 1:0.70, 2:0.65, 3:0.65, 4:0.60, 5:0.60, 6:0.60 };
-  const resultados = [];
-
-  estadoActual = { dni, nombre, deuda, grupo, descuentoBase: null, productos: obtenerProductos(), resultados: {} };
-
-  [1, 2, 3, 4, 5, 6].forEach((c) => {
-    const totalCliente = tipo === 'cuota' ? montoInput * c : montoInput;
-    const cuotaValor   = totalCliente / c;
-    const descuento    = 1 - totalCliente / base;
-    const limite       = limites[c];
-
-    let estado, clase;
-    if (totalCliente > base + 0.01) {
-      estado = '❌ Supera deuda';
-      clase  = 'inv-imposible';
-    } else if (descuento < 0) {
-      estado = '❌ Supera deuda';
-      clase  = 'inv-imposible';
-    } else if (descuento > limite + 0.001) {
-      const exceso = Math.round((descuento - limite) * 100);
-      estado = `⚠️ ${exceso}pt sobre límite`;
-      clase  = 'inv-borde';
-    } else {
-      estado = '✅ Viable';
-      clase  = 'inv-viable';
-    }
-
-    // Calcular con el descuento real (o capado al límite si excede)
-    const descUsado = Math.min(Math.max(descuento, 0), limite);
-    const calculo   = calcularPlan(deuda, c, descUsado);
-    estadoActual.resultados[c] = { ...PLANES[c], ...calculo };
-
-    resultados.push({ c, totalCliente, cuotaValor, descuento, clase, estado, viable: clase === 'inv-viable' });
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  const monto = parsearNumero(document.getElementById("inputMontoCliente").value);
+  const tipo = document.querySelector('input[name="montoTipo"]:checked')?.value || "cuota";
+  if (!(deuda > 0) || !(monto > 0)) { alert("Ingresá deuda y monto del cliente válidos."); return; }
+  try { aCentavos(deuda); aCentavos(monto); } catch(e) { alert(e.message); return; }
+  estadoActual = estadoFormularioGalicia(deuda);
+  estadoActual.montoCliente = {monto,tipo};
+  const resultados = cuotasDisponiblesGalicia(deuda).map(c => {
+    const total = tipo === "cuota" ? aCentavos(monto)*c/100 : monto;
+    const base = deuda * 1.242;
+    if (aCentavos(total) < c) return {c,plan:null,errores:["El total no permite un centavo por pago."]};
+    const plan = {...crearPlanFijoGalicia(total,c), modalidad:"quita", tna:0,
+      deudaConHonorarios:base, porcentaje:Math.max(0,(1-total/base)*100),
+      montoDescuento:base-total, label:c+" Pagos"};
+    const errores = erroresPlanGalicia(deuda,plan);
+    estadoActual.resultados[c] = plan;
+    return {c,plan,errores};
   });
-
-  // Subtitle
-  const tipoLabel = tipo === 'cuota' ? `${formatARS(montoInput)} / cuota` : `${formatARS(montoInput)} total`;
-  document.getElementById('gridInversoSubtitle').textContent =
-    `Deuda: ${formatARS(deuda)} · El cliente puede pagar: ${tipoLabel}`;
-
+  document.getElementById("gridInversoSubtitle").textContent = "Deuda: " + formatARS(deuda) + " · Disponible: " + formatARS(monto);
   renderizarGridInverso(resultados);
+  renderizarTablaEscenarios(deuda,monto,tipo);
 }
 
 function renderizarGridInverso(resultados) {
-  const tbody = document.getElementById('gridInversoBody');
-  tbody.innerHTML = '';
-
-  resultados.forEach(({ c, totalCliente, cuotaValor, descuento, clase, estado }) => {
-    const pct = descuento < 0 ? '—' : `${Math.round(descuento * 100)}%`;
-    const totalFmt = descuento < 0 ? '—' : formatARS(totalCliente);
-    const cuotaFmt = descuento < 0 ? '—' : formatARS(cuotaValor);
-    const label    = c === 1 ? '1 Pago (Contado)' : `${c} Pagos`;
-    const acciones = clase !== 'inv-imposible'
-      ? `<button class="btn-int btn-int-wa"  onclick="copiarWhatsApp(${c})" title="WhatsApp">💬</button>
-         <button class="btn-int btn-int-pdf" onclick="generarPDF(${c})"     title="PDF">📄</button>`
-      : '—';
-
-    const tr = document.createElement('tr');
-    tr.className = clase;
-    tr.innerHTML = `
-      <td><strong>${label}</strong></td>
-      <td class="mono">${totalFmt}</td>
-      <td class="mono">${cuotaFmt}</td>
-      <td><span class="inv-pct">${pct} OFF</span></td>
-      <td><span class="inv-estado ${clase}">${estado}</span></td>
-      <td class="inv-actions">${acciones}</td>
-    `;
+  const tbody = document.getElementById("gridInversoBody");
+  tbody.innerHTML = "";
+  resultados.forEach(({c,plan,errores}) => {
+    const tr = document.createElement("tr");
+    tr.className = errores.length ? "inv-imposible" : "inv-viable";
+    if (!plan) {
+      tr.innerHTML = '<td>'+c+' Pagos</td><td>—</td><td>—</td><td>—</td><td>'+errores.join(" ")+'</td><td>—</td>';
+      tbody.appendChild(tr); return;
+    }
+    tr.innerHTML = '<td>'+c+' Pagos</td><td>'+formatARS(plan.montoRecuperar)+'</td><td>'+describirPagosGalicia(plan)+'</td><td>'+plan.porcentaje.toFixed(2)+'% OFF</td><td>'+(errores.length ? errores.join(" ") : "✅ Viable")+'</td><td>'+(errores.length ? "—" : '<button onclick="copiarWhatsApp('+c+')">💬</button> <button onclick="generarPDF('+c+')">📄</button>')+'</td>';
     tbody.appendChild(tr);
   });
-
-  document.getElementById('gridInversoWrap').style.display = 'none';
-  document.getElementById('resultsGrid').style.display     = 'none';
-  // Show tabla de escenarios with reference highlighted
-  renderizarTablaEscenarios(deuda, montoInput, tipo);
-
-  setTimeout(() => {
-    document.getElementById('gridInversoWrap')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, 100);
+  document.getElementById("gridInversoWrap").style.display = "block";
+  document.getElementById("resultsGrid").style.display = "none";
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   FUNCIÓN PRINCIPAL: CALCULAR PROPUESTAS
-   ───────────────────────────────────────────────────────────────── */
+function estadoFormularioGalicia(deuda) {
+  return {nombre:document.getElementById("inputNombre").value.trim(),
+    dni:document.getElementById("inputDni").value.trim(), deuda, grupo:"CO",
+    productos:obtenerProductos(), resultados:{}, contexto:JSON.stringify({deuda,...contextoPoliticaGalicia()})};
+}
 function calcularPropuestas() {
-  const dni         = document.getElementById("inputDni").value.trim();
-  const nombre      = document.getElementById("inputNombre").value.trim();
-  const rawDeuda    = document.getElementById("inputDeuda").value.trim();
-  const rawDescuento = document.getElementById("inputDescuento").value.trim();
-  const grupo       = "CO";
-
-  if (!rawDeuda) {
-    alert('⚠️ El campo "Saldo Deuda Total" es obligatorio.');
-    document.getElementById("inputDeuda").focus();
-    return;
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  if (!(deuda > 0)) { alert("Ingresá una deuda financiera válida."); return; }
+  try { aCentavos(deuda); } catch(e) { alert(e.message); return; }
+  const raw = document.getElementById("inputDescuento").value.trim();
+  const descuento = raw === "" ? null : Number(raw)/100;
+  if (descuento !== null && (!Number.isFinite(descuento) || descuento < 0 || descuento > 1)) {
+    alert("La quita debe estar entre 0 y 100%."); return;
   }
-
-  const deuda = parsearNumero(rawDeuda);
-
-  if (isNaN(deuda) || deuda <= 0) {
-    alert('⚠️ El valor ingresado en "Saldo Deuda Total" no es válido.\nIngresá un número positivo. Ej: 150000 o 150.000,00');
-    document.getElementById("inputDeuda").focus();
-    return;
-  }
-
-  let descuentoBase = parseFloat(rawDescuento) / 100;
-  if (isNaN(descuentoBase) || descuentoBase <= 0) {
-    descuentoBase = null;
-  }
-
-  estadoActual = { dni, nombre, deuda, grupo, descuentoBase, productos: obtenerProductos(), resultados: {} };
-
-  const limites = { 1: 0.70, 2: 0.65, 3: 0.65, 4: 0.60, 5: 0.60, 6: 0.60 };
-  let alertas = [];
-
-  [1, 2, 3, 4, 5, 6].forEach((c) => {
-    let descuentoUsado = descuentoBase !== null ? descuentoBase : PLANES[c].descuento;
-
-    if (descuentoUsado > limites[c]) {
-      if ([1, 3, 6].includes(c)) {
-        alertas.push(`Plan ${c} pago(s): ${Math.round(descuentoUsado * 100)}% ajustado a máximo ${Math.round(limites[c] * 100)}%`);
-      }
-      descuentoUsado = Math.min(descuentoUsado, limites[c]);
-    }
-
-    const plan = PLANES[c];
-    const calculo = calcularPlan(deuda, c, descuentoUsado);
-    estadoActual.resultados[c] = { ...plan, ...calculo };
+  estadoActual = estadoFormularioGalicia(deuda);
+  cuotasDisponiblesGalicia(deuda).forEach(c => {
+    const limite = limiteQuitaGalicia(c,deuda);
+    const usado = descuento === null ? limite : Math.min(descuento,limite);
+    estadoActual.resultados[c] = {...PLANES[c],...calcularPlan(deuda,c,usado)};
   });
-
-  if (alertas.length > 0) {
-    alert("⚠️ Ajustes aplicados:\n" + alertas.join("\n"));
-  }
-
   renderizarResultados();
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   TABLA DE ESCENARIOS
-   ───────────────────────────────────────────────────────────────── */
-// Niveles de quita a mostrar en la tabla (de mayor a menor beneficio)
-const QUITA_NIVELES = [70, 65, 60, 55, 50, 45, 40, 35, 30, 20, 10, 0];
-// Límites por cuota (igual que el resto del sistema)
-const LIMITES_TABLA = { 1:70, 2:65, 3:65, 4:60, 5:60, 6:60 };
-// Planes a mostrar como columnas
-const CUOTAS_TABLA  = [1, 2, 3, 4, 5, 6];
+const QUITA_NIVELES = [85,80,75,70,65,60,55,50,45,40,35,30,20,10,0];
+const _escSeleccion = new Map();
 
 function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
-  const wrap = document.getElementById('tablaEscenariosWrap');
+  const wrap = document.getElementById("tablaEscenariosWrap");
   if (!wrap) return;
-
-  if (!deuda || deuda <= 0) { wrap.style.display = 'none'; return; }
-
-  const base = deuda * 1.242;
-
-  // Para deudas grandes (desde $20.000.000) se habilita el plan de 9 cuotas (quita máx. 60%).
-  const cuotasTabla = deuda >= 20000000 ? [...CUOTAS_TABLA, 9] : CUOTAS_TABLA;
-  const limitesTabla = { ...LIMITES_TABLA, 9: 60 };
-
-  // ── Encabezado ──────────────────────────────────────────────────
-  const thead = document.getElementById('tablaEscenariosHead');
-  thead.innerHTML = `<tr>
-    <th class="esc-th-quita">% Quita</th>
-    ${cuotasTabla.map(c => `<th>${c === 1 ? '1 Pago' : c + ' Pagos'}</th>`).join('')}
-  </tr>`;
-
-  // ── Calcular referencia del cliente ─────────────────────────────
-  // Para cada fila: ¿cuál celda coincide con lo que el cliente puede pagar?
-  let refFilaQuita = null;
-  if (refMonto && refMonto > 0 && refTipo) {
-    // Buscar la fila cuya celda más se acerca al monto de referencia
-    // No resaltamos una celda sino la FILA cuya quita% produce el importe más cercano al ref
-    // Para el tipo 'cuota': buscamos la fila donde alguna celda ≈ refMonto
-    // Para el tipo 'total': buscamos fila donde total ≈ refMonto
-  }
-
-  // ── Cuerpo ──────────────────────────────────────────────────────
-  const tbody = document.getElementById('tablaEscenariosBody');
-  tbody.innerHTML = '';
-
-  // Guardar la quita% de cada fila para el click
-  QUITA_NIVELES.forEach((quita) => {
-    const total       = base * (1 - quita / 100);
-    const tr          = document.createElement('tr');
-    tr.dataset.quita  = quita;
-
-    // Columna quita%
-    const tdQ = document.createElement('td');
-    tdQ.className  = 'esc-td-quita';
-    tdQ.innerHTML  = `<strong>${quita}%</strong>`;
-    tr.appendChild(tdQ);
-
-    let filaResaltada = false;
-
-    cuotasTabla.forEach((c) => {
-      const limite     = limitesTabla[c];
-      const permitido  = quita <= limite;
-      const importeCuota = permitido ? Math.ceil(total / c) : null;
-
-      const td = document.createElement('td');
-
-      if (!permitido) {
-        td.className  = 'esc-td-nopermitido';
-        td.textContent = '—';
-      } else {
-        // ── Reglas de política interna ────────────────────────────
-        const esSinQuita   = quita === 0;
-        const esBajoSaldo  = deuda < 250000;
-        let   clasePolitica = '';
-        let   ocultarCelda  = false;
-
-        if (esBajoSaldo && quita > 20) {
-          // Saldo < $250K: solo se permite hasta 20% de quita
-          ocultarCelda = true;
-          td.className  = 'esc-td-nopermitido esc-td-policy-lock';
-          td.title      = '🔒 Saldo < $250.000: quita máxima 20%';
-          td.textContent = '🔒';
-          tr.appendChild(td);
-          return; // skip normal rendering
-        }
-
-        if (!esSinQuita) {
-          // Con quita: filtrar por rentabilidad de cuota
-          if (importeCuota < 250000) {
-            ocultarCelda = true;
-          } else if (importeCuota < 400000) {
-            clasePolitica = 'esc-td-no-rentable';
-          }
-        } else {
-          // Sin quita (0%):
-          // - Deuda < $200K → solo 1 pago contado (ocultar cuotas)
-          // - Deuda >= $200K → mostrar cuotas con umbrales de potabilidad
-          if (deuda < 200000 && c !== 1) {
-            ocultarCelda = true;
-          } else if (deuda < 200000 && c === 1) {
-            clasePolitica = 'esc-td-potable';
-          } else {
-            // Deuda >= 200K: umbrales por importe de cuota
-            const importeXcuota = total / c;
-            if (importeXcuota < 150000) {
-              ocultarCelda = true;
-            } else if (importeXcuota < 250000) {
-              clasePolitica = 'esc-td-no-recomendable';
-            } else {
-              clasePolitica = 'esc-td-potable';
-            }
-          }
-        }
-
-        if (ocultarCelda) {
-          td.className  = 'esc-td-nopermitido';
-          td.textContent = '—';
-          tr.appendChild(td);
-          return;
-        }
-
-        const cellKey  = `${quita}_${c}`;
-        const selected = _escSeleccion.has(cellKey);
-        td.className   = `esc-td-ok ${clasePolitica}${selected ? ' esc-td-selected' : ''}`.trim();
-        td.innerHTML   = `${formatARS(importeCuota)}<span class="esc-check">${selected ? '✓' : ''}</span>`;
-        td.title       = `${quita}% quita · ${c === 1 ? '1 Pago' : c + ' Pagos'} · ${formatARS(importeCuota)}/cuota — Click para seleccionar`;
-        td.style.cursor = 'pointer';
-
-        // Resaltar si coincide con la referencia del cliente
-        if (refMonto && refMonto > 0) {
-          let match = false;
-          if (refTipo === 'cuota') match = Math.abs(importeCuota - refMonto) / refMonto < 0.05;
-          else if (refTipo === 'total') match = Math.abs(total - refMonto) / refMonto < 0.05;
-          if (match) { td.classList.add('esc-td-match'); filaResaltada = true; }
-        }
-
-        // Click → toggle selección
-        td.addEventListener('click', (e) => {
-          e.stopPropagation();
-          toggleCeldaEscenario(quita, c, importeCuota, total);
-        });
+  if (!(deuda > 0)) { wrap.style.display = "none"; return; }
+  const columnas = cuotasDisponiblesGalicia(deuda);
+  document.getElementById("tablaEscenariosHead").innerHTML = '<tr><th>% Quita</th>'+columnas.map(c=>'<th>'+c+' Pago/s</th>').join("")+'</tr>';
+  const body = document.getElementById("tablaEscenariosBody");
+  body.innerHTML = "";
+  QUITA_NIVELES.forEach(quita => {
+    const tr = document.createElement("tr");
+    tr.dataset.quita = quita;
+    const tdQ = document.createElement("td");
+    tdQ.className = "esc-td-quita"; tdQ.textContent = quita+"%"; tr.appendChild(tdQ);
+    columnas.forEach(c => {
+      const plan = calcularPlan(deuda,c,quita/100);
+      const errores = erroresPlanGalicia(deuda,plan);
+      const td = document.createElement("td");
+      if (errores.length) { td.className = "esc-td-nopermitido"; td.textContent = "—"; td.title = errores.join(" "); }
+      else {
+        const seleccionado = _escSeleccion.has(quita+"_"+c);
+        td.className = "esc-td-ok"+(seleccionado ? " esc-td-selected" : "");
+        td.textContent = formatARS(plan.valorCuota)+(seleccionado ? " ✓" : "");
+        td.title = quita+"% quita · Total "+formatARS(plan.montoRecuperar);
+        td.style.cursor = "pointer";
+        td.addEventListener("click",()=>toggleCeldaEscenario(quita,c,plan.valorCuota,plan.montoRecuperar));
+        const referencia = refTipo === "total" ? plan.montoRecuperar : plan.valorCuota;
+        if (refMonto > 0 && Math.abs(referencia-refMonto)/refMonto < .05) td.classList.add("esc-td-match");
       }
       tr.appendChild(td);
     });
-
-    if (filaResaltada) tr.classList.add('esc-row-match');
-
-
-
-    tbody.appendChild(tr);
+    body.appendChild(tr);
   });
-
-  // Referencia label
-  const refRow   = document.getElementById('tablaEscRefRow');
-  const refLabel = document.getElementById('tablaEscRefLabel');
-  if (refMonto && refMonto > 0 && refTipo) {
-    const desc = refTipo === 'cuota'
-      ? `Referencia del cliente: ${formatARS(refMonto)} / cuota`
-      : `Referencia del cliente: ${formatARS(refMonto)} total`;
-    refLabel.textContent    = `🎯 ${desc} — filas y celdas resaltadas son las más cercanas`;
-    refRow.style.display    = 'flex';
-  } else {
-    refRow.style.display    = 'none';
-  }
-
-  wrap.style.display = 'block';
+  const ref = document.getElementById("tablaEscRefRow");
+  ref.style.display = refMonto > 0 ? "flex" : "none";
+  document.getElementById("tablaEscRefLabel").textContent = refMonto > 0 ? "Referencia del cliente: "+formatARS(refMonto)+(refTipo === "total" ? " total" : " / cuota") : "";
+  wrap.style.display = "block";
 }
-
-/* ─── SELECCIÓN MÚLTIPLE DE CELDAS ─────────────────────────────── */
-// Mapa: "quita_cuotas" → { quita, cuotas, importeCuota, totalPaga }
-const _escSeleccion = new Map();
 
 function toggleCeldaEscenario(quita, cuotas, importeCuota, totalPaga) {
   const key = `${quita}_${cuotas}`;
@@ -999,19 +603,17 @@ function toggleCeldaEscenario(quita, cuotas, importeCuota, totalPaga) {
 
   // ── Validación de política interna ─────────────────────────────────
   const _deudaActual = parsearNumero(document.getElementById('inputDeuda')?.value || '');
-  if (!isNaN(_deudaActual) && _deudaActual < 250000 && quita > 20) {
-    mostrarToast("🔒 Saldo menor a $250.000: la quita máxima permitida es 20%.", "error");
-    return;
-  }
+  const propuesta = calcularPlan(_deudaActual, cuotas, quita / 100);
+  if (!autorizarEmisionGalicia(_deudaActual, propuesta)) return;
 
   // ── Validación lógica: coherencia entre cuotas y total ────────────
   const deuda = parsearNumero(document.getElementById('inputDeuda')?.value || '');
   if (!isNaN(deuda) && deuda > 0) {
     const base     = deuda * 1.242;
-    const totalNew = base * (1 - quita / 100);
+    const totalNew = propuesta.montoRecuperar;
 
     for (const [, sel] of _escSeleccion) {
-      const totalSel = base * (1 - sel.quita / 100);
+      const totalSel = calcularPlan(deuda, sel.cuotas, sel.quita / 100).montoRecuperar;
 
       // Caso: nueva tiene MÁS cuotas pero paga MENOS o IGUAL que una existente
       if (cuotas > sel.cuotas && totalNew <= totalSel) {
@@ -1094,10 +696,10 @@ function actualizarPanelSeleccion() {
   ordenadas.forEach(({ quita, cuotas }) => {
     const plan    = calcularPlan(deuda, cuotas, quita / 100);
     const label   = cuotas === 1 ? '1 Pago (Contado)' : `${cuotas} Pagos`;
-    const capB    = plan.montoRecuperar / 1.242;
-    const honA    = plan.montoRecuperar - capB;
-    const capXc   = capB / cuotas;
-    const honXc   = honA / cuotas;
+    const capB    = plan.capitalBanco;
+    const honA    = plan.honorariosAgencia;
+    const capXc   = plan.pagos[0].banco;
+    const honXc   = plan.pagos[0].honorarios;
 
     const cuotaRow = cuotas > 1
       ? `<div class="plan-detail-row">
@@ -1182,146 +784,30 @@ function limpiarSeleccion() {
 }
 
 function copiarPropuestaCombinada() {
-  if (_escSeleccion.size === 0) return;
-  const deuda  = parsearNumero(document.getElementById('inputDeuda')?.value || '');
-  const nombre = document.getElementById('inputNombre')?.value?.trim() || '';
-  const dni    = document.getElementById('inputDni')?.value?.trim()    || '';
-  if (isNaN(deuda) || deuda <= 0) { alert('⚠️ Ingresá la deuda primero.'); return; }
-
-  const operador = localStorage.getItem('co_re_operador') || 'NN';
-  const base     = deuda * 1.242;
-  const hoy      = new Date().toLocaleDateString('es-AR', { day:'2-digit', month:'2-digit', year:'numeric' });
-  const vence    = getVencimiento();
-
-  const alternativas = Array.from(_escSeleccion.values())
-    .sort((a, b) => b.quita - a.quita || a.cuotas - b.cuotas);
-
-  // Productos
-  const productosWA    = obtenerProductos();
-  const productosLineas = productosWA.map(p => `* ${p.tipo}`).join('\n');
-
-  // Desglose del saldo: capital + honorarios (24,2% = honorarios 20% + IVA 21%)
-  const honorarios = Math.ceil(base - deuda);
-  const productosDeuda = productosWA
-    .filter(p => p.tipo !== 'Honorarios de Gestión Extrajudicial');
-  const productosLineasMsg = productosDeuda
-    .map(p => `• ${p.tipo}${p.numero ? ` (${p.numero})` : ''}`)
-    .join('\n');
-  const bloqueProductos = productosLineasMsg
-    ? `Productos en gestión:\n${productosLineasMsg}\n\n`
-    : '';
-
-  // Opciones
-  const EMOJIS = ['1️⃣','2️⃣','3️⃣','4️⃣'];
-  const opcionesTexto = alternativas.map(({ quita, cuotas }, i) => {
-    const total      = Math.ceil(base * (1 - quita / 100));
-    const porCuota   = Math.ceil(total / cuotas);
-    const titulo     = cuotas === 1
-      ? 'PAGO CONTADO'
-      : `${cuotas} CUOTAS SIN INTERÉS`;
-    const detalle    = cuotas === 1
-      ? `Quita: ${quita}% | Total: ${formatARS(total)}`
-      : `Quita: ${quita}% | ${cuotas} cuotas de ${formatARS(porCuota)}`;
-    return `${EMOJIS[i]} OPCIÓN ${i + 1} – ${titulo}\n${detalle}`;
-  }).join('\n\n');
-
-  // Opciones en una línea para mantener el mensaje corto
-  const opcionesCortas = alternativas.map(({ quita, cuotas }, i) => {
-    const total    = Math.ceil(base * (1 - quita / 100));
-    const porCuota = Math.ceil(total / cuotas);
-    if (cuotas === 1) {
-      const cond = quita > 0 ? `${quita}% de quita` : 'pago contado';
-      return `${i + 1}. Pago contado (${cond}) → *${formatARS(total)}*`;
-    }
-    const cond = quita > 0
-      ? `${quita}% de quita + financiación en ${cuotas} cuotas sin interés`
-      : `financiación en ${cuotas} cuotas sin interés (tasa 0%)`;
-    return `${i + 1}. ${cond} → *${cuotas} × ${formatARS(porCuota)}*`;
-  }).join('\n');
-
-  const texto =
-`Estimado/a ${nombre || ''}, buenos días.
-
-Le escribe ${operador}, del Estudio CO-RE, a cargo de la gestión extrajudicial de su deuda con Banco Galicia.
-
-${bloqueProductos}Detalle del saldo al ${hoy}:
-Saldo actual: ${formatARS(deuda)}
-Honorarios de gestión (incluyen IVA): ${formatARS(honorarios)}
-*Saldo total a cancelar: ${formatARS(base)}*
-
-A este saldo total ya se le sumaron los honorarios; sobre él se calculan las siguientes propuestas:
-
-${opcionesCortas}
-
-Tenga en cuenta que los intereses modifican el saldo diariamente.
-Propuestas válidas hasta el ${vence}.
-
-Quedamos a la espera de su respuesta para indicarle el medio de pago de la opción que elija.
-
-Saludos cordiales,
-${operador} — Estudio CO-RE
-www.co-re.com.ar | correo@co-re.com.ar
-0800-345-9707 | wa.me/5491158977596`;
-
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  const estado = estadoFormularioGalicia(deuda);
+  const opciones = [..._escSeleccion.values()].map(({quita,cuotas})=>calcularPlan(deuda,cuotas,quita/100));
+  if (!opciones.length || opciones.some(plan=>!autorizarEmisionGalicia(deuda,plan))) return;
+  const texto = "Banco Galicia — Estudio CO-RE\nEstimado/a "+estado.nombre+"\n\n"+
+    opciones.map((p,i)=>(i+1)+". Quita "+p.porcentaje+"% · Total "+formatARS(p.montoRecuperar)+" · "+describirPagosGalicia(p)).join("\n")+
+    "\n\nPrimera cuota: "+formatearFechaGalicia(contextoPoliticaGalicia().primeraCuota)+"\nVálida hasta "+getVencimiento()+". Honorarios incluidos.";
   copiarTexto(texto);
-  mostrarToast(`💬 Propuesta (${alternativas.length} opciones) copiada`, 'success');
 }
 
 function generarPDFDesdeSeleccion(quita, cuotas) {
-  const nombre = document.getElementById('inputNombre')?.value?.trim() || '';
-  const dni    = document.getElementById('inputDni')?.value?.trim()    || '';
-  const deuda  = parsearNumero(document.getElementById('inputDeuda')?.value || '');
-  if (!nombre) { alert('⚠️ Completá Nombre y Apellido.'); return; }
-  if (!dni)    { alert('⚠️ Completá DNI.'); return; }
-  if (isNaN(deuda) || deuda <= 0) { alert('⚠️ Ingresá la deuda primero.'); return; }
-
-  const plan = calcularPlan(deuda, cuotas, quita / 100);
-  const planData = {
-    ...PLANES[cuotas] || { label: `${cuotas} Pagos`, cuotas },
-    ...plan,
-    porcentaje: quita,
-  };
-
-  // Temporarily set estadoActual for PDF generation
-  const backup = { ...estadoActual };
-  estadoActual.nombre = nombre;
-  estadoActual.dni    = dni;
-  estadoActual.deuda  = deuda;
-  estadoActual.resultados = estadoActual.resultados || {};
-  estadoActual.resultados[cuotas] = planData;
-  estadoActual.productos = obtenerProductos();
-
-  generateAgreementPDF(cuotas, planData);
-
-  // Restore (products may have changed)
-  estadoActual.nombre = backup.nombre || nombre;
-  estadoActual.dni    = backup.dni    || dni;
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  const estado = estadoFormularioGalicia(deuda);
+  if (!estado.nombre || !estado.dni) { alert("Completá nombre y DNI."); return; }
+  const plan = calcularPlan(deuda,cuotas,quita/100);
+  if (!autorizarEmisionGalicia(deuda,plan)) return;
+  generateAgreementPDF(cuotas,plan,estado);
 }
 
 function copiarWASeleccion(quita, cuotas) {
-  const nombre = document.getElementById('inputNombre')?.value?.trim() || '';
-  const dni    = document.getElementById('inputDni')?.value?.trim()    || '';
-  const deuda  = parsearNumero(document.getElementById('inputDeuda')?.value || '');
-  if (isNaN(deuda) || deuda <= 0) { alert('⚠️ Ingresá la deuda primero.'); return; }
-
-  const plan = calcularPlan(deuda, cuotas, quita / 100);
-  const backup = { ...estadoActual };
-  estadoActual.nombre  = nombre;
-  estadoActual.dni     = dni;
-  estadoActual.deuda   = deuda;
-  estadoActual.productos = obtenerProductos();   // ← faltaba: por eso no salían los productos
-  estadoActual.resultados = estadoActual.resultados || {};
-  estadoActual.resultados[cuotas] = {
-    ...PLANES[cuotas] || { label: `${cuotas} Pagos`, cuotas },
-    ...plan, porcentaje: quita,
-  };
-
-  const texto = generarTextoWhatsApp(cuotas);
-  copiarTexto(texto);
-  mostrarToast('💬 WhatsApp copiado', 'success');
-
-  estadoActual.nombre = backup.nombre || nombre;
-  estadoActual.dni    = backup.dni    || dni;
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  const plan = calcularPlan(deuda,cuotas,quita/100);
+  if (!autorizarEmisionGalicia(deuda,plan)) return;
+  copiarTexto(crearTextoPropuestaGalicia(plan,estadoFormularioGalicia(deuda)));
 }
 
 function usarFilaEscenario(quitaPct) {
@@ -1343,8 +829,27 @@ function usarFilaEscenario(quitaPct) {
    PREVIEW LIVE DE CÁLCULO EN EL FORMULARIO
    ───────────────────────────────────────────────────────────────── */
 function actualizarLivePreview() {
+  actualizarEstadoPolitica();
   const rawDeuda = document.getElementById("inputDeuda")?.value?.trim() || "";
   const deuda    = parsearNumero(rawDeuda);
+  if (deuda > 0) {
+    try { aCentavos(deuda); }
+    catch(e) {
+      document.getElementById("politicaEstado").textContent=e.message;
+      document.getElementById("tablaEscenariosWrap").style.display="none";
+      return;
+    }
+  }
+  // Ninguna selección calculada para otra deuda/fecha se puede seguir ofreciendo.
+  const contexto = JSON.stringify({deuda,...contextoPoliticaGalicia()});
+  if (contexto !== actualizarLivePreview.contexto) {
+    _escSeleccion.clear();
+    actualizarPanelSeleccion();
+    document.getElementById("resultsGrid").style.display = "none";
+    document.getElementById("gridInversoWrap").style.display = "none";
+    document.getElementById("acuerdoResultados").innerHTML = "";
+    actualizarLivePreview.contexto = contexto;
+  }
 
   // Campo base readonly en el formulario
   const inputBase = document.getElementById("inputBase");
@@ -1412,258 +917,108 @@ function obtenerProductos() {
    RENDERIZAR RESULTADOS EN EL DOM
    ───────────────────────────────────────────────────────────────── */
 function renderizarResultados() {
-  const r = estadoActual.resultados;
-
-  // Helper: split capital / honorarios por cuotas
-  const split = (plan, cuotas = 1) => {
-    const cap = plan.montoRecuperar / 1.242;
-    const hon = plan.montoRecuperar - cap;
-    return { cap, hon, capXcuota: cap / cuotas, honXcuota: hon / cuotas };
-  };
-  const deudaOrig = estadoActual.deuda;
-
-  // ── Plan 1 ──
-  const s1 = split(r[1], 1);
-  document.getElementById("deudaOrig1").textContent       = formatARS(deudaOrig);
-  document.getElementById("honExtra1").textContent        = `+ ${formatARS(r[1].deudaConHonorarios - deudaOrig)}`;
-  document.getElementById("baseCalculo1").textContent     = formatARS(r[1].deudaConHonorarios);
-  document.getElementById("quitaLbl1").textContent        = r[1].porcentaje;
-  document.getElementById("descuento1").textContent       = `- ${formatARS(r[1].montoDescuento)}`;
-  document.getElementById("monto1").textContent           = formatARS(r[1].montoRecuperar);
-  document.getElementById("capitalBancoCard1").textContent = formatARS(s1.cap);
-  document.getElementById("honAgenCard1").textContent     = formatARS(s1.hon);
-  document.getElementById("descuentoDisplay1").textContent = `${r[1].porcentaje}% OFF`;
-
-  // ── Plan 3 ──
-  const s3 = split(r[3], 3);
-  document.getElementById("deudaOrig3").textContent       = formatARS(deudaOrig);
-  document.getElementById("honExtra3").textContent        = `+ ${formatARS(r[3].deudaConHonorarios - deudaOrig)}`;
-  document.getElementById("baseCalculo3").textContent     = formatARS(r[3].deudaConHonorarios);
-  document.getElementById("quitaLbl3").textContent        = r[3].porcentaje;
-  document.getElementById("descuento3").textContent       = `- ${formatARS(r[3].montoDescuento)}`;
-  document.getElementById("monto3").textContent           = formatARS(r[3].montoRecuperar);
-  document.getElementById("cuota3").textContent           = `${formatARS(r[3].valorCuota)} / cuota`;
-  document.getElementById("capitalBancoCard3").textContent = `${formatARS(s3.capXcuota)} / cuota`;
-  document.getElementById("honAgenCard3").textContent     = `${formatARS(s3.honXcuota)} / cuota`;
-  document.getElementById("descuentoDisplay3").textContent = `${r[3].porcentaje}% OFF`;
-
-  // ── Plan 6 ──
-  const s6 = split(r[6], 6);
-  document.getElementById("deudaOrig6").textContent       = formatARS(deudaOrig);
-  document.getElementById("honExtra6").textContent        = `+ ${formatARS(r[6].deudaConHonorarios - deudaOrig)}`;
-  document.getElementById("baseCalculo6").textContent     = formatARS(r[6].deudaConHonorarios);
-  document.getElementById("quitaLbl6").textContent        = r[6].porcentaje;
-  document.getElementById("descuento6").textContent       = `- ${formatARS(r[6].montoDescuento)}`;
-  document.getElementById("monto6").textContent           = formatARS(r[6].montoRecuperar);
-  document.getElementById("cuota6").textContent           = `${formatARS(r[6].valorCuota)} / cuota`;
-  document.getElementById("capitalBancoCard6").textContent = `${formatARS(s6.capXcuota)} / cuota`;
-  document.getElementById("honAgenCard6").textContent     = `${formatARS(s6.honXcuota)} / cuota`;
-  document.getElementById("descuentoDisplay6").textContent = `${r[6].porcentaje}% OFF`;
-
-  const card1 = document.getElementById("card1");
-  const card3 = document.getElementById("card3");
-
-  card3.classList.remove("featured");
-  const ribbon3 = card3.querySelector(".featured-ribbon");
-  if (ribbon3) ribbon3.remove();
-
-  card1.classList.add("featured");
-  if (!card1.querySelector(".featured-ribbon")) {
-    const ribbon = document.createElement("div");
-    ribbon.className   = "featured-ribbon";
-    ribbon.textContent = "CASO RECOMENDADO";
-    card1.insertBefore(ribbon, card1.firstChild);
-  }
-  
-  const planHeader1 = card1.querySelector(".plan-header");
-  if (planHeader1 && !planHeader1.querySelector(".max-ahorro-badge")) {
-    const badge = document.createElement("div");
-    badge.className   = "max-ahorro-badge";
-    badge.textContent = "⭐ MÁXIMO AHORRO";
-    planHeader1.appendChild(badge);
-  }
-
-  let urgenciaBanner = document.getElementById("urgenciaBanner");
-  if (!urgenciaBanner) {
-    urgenciaBanner = document.createElement("div");
-    urgenciaBanner.id        = "urgenciaBanner";
-    urgenciaBanner.className = "urgencia-banner";
-    urgenciaBanner.innerHTML =
-      `<span class="urgencia-icon">⚠️</span>
-       <div>
-         <strong>PROPUESTA VÁLIDA SOLO POR 48 HORAS OPERATIVAS</strong>
-         <span>Vence: ${calcularVencimiento48hs()}</span>
-       </div>
-       <div class="urgencia-counter" id="urgenciaCounter"></div>`;
-    const resultsGrid = document.getElementById("resultsGrid");
-    resultsGrid.parentNode.insertBefore(urgenciaBanner, resultsGrid);
-    iniciarCountdown();
-  } else {
-    const fechaSpan = urgenciaBanner.querySelector("span:last-of-type");
-    if (fechaSpan) fechaSpan.textContent = `Vence: ${calcularVencimiento48hs()}`;
-  }
-
-  let guiaPanel = document.getElementById("guiaPanel");
-  if (!guiaPanel) {
-    guiaPanel = document.getElementById("guiaPanel");
-    guiaPanel.style.display = "block";
-  }
-
-  const resultsGrid    = document.getElementById("resultsGrid");
-
-  resultsGrid.style.display    = "grid";
-
-
-  setTimeout(() => {
-    document.getElementById("urgenciaBanner")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, 100);
-
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   CUOTAS INTERMEDIAS — RENDER Y TOGGLE
-   ───────────────────────────────────────────────────────────────── */
-
-
-function calcularVencimiento48hs() {
-  const ahora = new Date();
-  let horasRestantes = 48;
-  const cursor = new Date(ahora);
-
-  while (horasRestantes > 0) {
-    cursor.setHours(cursor.getHours() + 1);
-    const dia = cursor.getDay(); // 0=Dom, 6=Sab
-    if (dia !== 0 && dia !== 6) horasRestantes--;
-  }
-
-  return cursor.toLocaleDateString("es-AR", {
-    weekday: "short", day: "2-digit", month: "2-digit", year: "numeric",
+  [1,3,6].forEach(c => {
+    const plan = estadoActual.resultados[c];
+    const poner = (id,valor) => { const el=document.getElementById(id+c); if(el) el.textContent=valor; };
+    poner("deudaOrig",formatARS(estadoActual.deuda));
+    poner("honExtra","+ "+formatARS(plan.deudaConHonorarios-estadoActual.deuda));
+    poner("baseCalculo",formatARS(plan.deudaConHonorarios));
+    poner("quitaLbl",plan.porcentaje);
+    poner("descuento","- "+formatARS(plan.montoDescuento));
+    poner("monto",formatARS(plan.montoRecuperar));
+    poner("cuota",formatARS(plan.valorCuota)+" / cuota");
+    poner("capitalBancoCard",formatARS(plan.pagos[0].banco)+(c>1?" / cuota":""));
+    poner("honAgenCard",formatARS(plan.pagos[0].honorarios)+(c>1?" / cuota":""));
+    poner("descuentoDisplay",plan.porcentaje+"% OFF");
+    const errores=erroresPlanGalicia(estadoActual.deuda,plan);
+    const card=document.getElementById("card"+c);
+    card.title=errores.join(" ");
+    card.querySelectorAll("button").forEach(b=>b.disabled=Boolean(errores.length));
   });
+  document.getElementById("gridInversoWrap").style.display="none";
+  document.getElementById("resultsGrid").style.display="grid";
+  document.getElementById("guiaPanel").style.display="block";
 }
 
-// Vencimiento para los mensajes: respeta la fecha elegida en el calendario.
-// Si no se eligió ninguna, cae en las 48 hs hábiles automáticas.
-function getVencimiento() {
-  const input = document.getElementById('inputVencimiento');
-  if (input && input.value) {
-    const [y, m, d] = input.value.split('-');
-    return new Date(y, m - 1, d).toLocaleDateString('es-AR', {
-      weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
-    });
+function formatearFechaGalicia(iso) {
+  return fechaISOValida(iso) ? new Date(iso+"T12:00:00Z").toLocaleDateString("es-AR",{timeZone:"America/Argentina/Buenos_Aires"}) : "—";
+}
+
+function vencimientoAutomaticoGalicia() {
+  const cursor = new Date();
+  let horas = 48;
+  while (horas > 0) {
+    cursor.setTime(cursor.getTime()+3600000);
+    const dia = new Intl.DateTimeFormat("en-US",{weekday:"short",timeZone:"America/Argentina/Buenos_Aires"}).format(cursor);
+    if (dia !== "Sat" && dia !== "Sun") horas--;
   }
-  return calcularVencimiento48hs();
+  return hoyArgentina(cursor) > POLITICA_GALICIA.hasta ? POLITICA_GALICIA.hasta : hoyArgentina(cursor);
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   COUNTDOWN VISUAL (actualiza cada segundo)
-   ───────────────────────────────────────────────────────────────── */
+
+function calcularVencimiento48hs() { return formatearFechaGalicia(vencimientoAutomaticoGalicia()); }
+function getVencimiento() { return getVencimientoPDF(); }
 let _countdownInterval = null;
 
-function iniciarCountdown() {
-  if (_countdownInterval) clearInterval(_countdownInterval);
-
-  const vencimiento = new Date();
-  vencimiento.setTime(vencimiento.getTime() + 48 * 60 * 60 * 1000);
-
-  function actualizar() {
-    const ahora = Date.now();
-    const diff  = vencimiento.getTime() - ahora;
-    const el    = document.getElementById("urgenciaCounter");
-    if (!el) { clearInterval(_countdownInterval); return; }
-    if (diff <= 0) {
-      el.textContent = "EXPIRADA";
-      el.style.color = "#ef4444";
-      clearInterval(_countdownInterval);
-      return;
-    }
-    const hh = String(Math.floor(diff / 3600000)).padStart(2, "0");
-    const mm = String(Math.floor((diff % 3600000) / 60000)).padStart(2, "0");
-    const ss = String(Math.floor((diff % 60000) / 1000)).padStart(2, "0");
-    el.textContent = `${hh}:${mm}:${ss}`;
-  }
-  actualizar();
-  _countdownInterval = setInterval(actualizar, 1000);
-}
-
-/* ─────────────────────────────────────────────────────────────────
-   GENERAR TEXTO PARA WHATSAPP
-   ───────────────────────────────────────────────────────────────── */
-function generarTextoWhatsApp(cuotas) {
-  const { dni, nombre, grupo } = estadoActual;
-  const plan = estadoActual.resultados[cuotas];
-  if (!plan) return "";
-
-  const nombreDisplay = nombre ? ` *${nombre}*` : "";
-  const dniDisplay    = dni    ? ` (DNI: ${dni})` : "";
-  const hoy = new Date().toLocaleDateString("es-AR", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-  });
-
-  // Desglose por cuenta
-  const capitalBanco      = plan.montoRecuperar / 1.242;
-  const honorariosAgencia = plan.montoRecuperar - capitalBanco;
-  const capitalPorCuota   = capitalBanco / cuotas;
-  const honPorCuota       = honorariosAgencia / cuotas;
-
-  // Línea de condición: si no hay quita, no mostramos "0%" (queda feo);
-  // en su lugar se resalta el beneficio de la financiación sin interés.
-  const lineaCondicion = plan.porcentaje > 0
-    ? `🏷️ Descuento aplicado: *${plan.porcentaje}%*\n`
-    : (cuotas > 1 ? `🏷️ Financiación en *${cuotas} cuotas sin interés* (tasa 0%)\n` : '');
-
-  // Saldo total antes de la quita (deuda + honorarios). Viene de calcularPlan;
-  // si por algún flujo no estuviera, se reconstruye desde la deuda cargada.
-  const saldoTotalPrevio = plan.deudaConHonorarios
-    ?? (estadoActual.deuda ? estadoActual.deuda * 1.242 : null);
-
-  let cuotasDetalle = "";
-  if (cuotas === 1) {
-    // En cancelación se muestra el saldo total que tenía y con cuánto cancela:
-    // sin el punto de partida, el descuento no se entiende.
-    const lineaSaldo = (saldoTotalPrevio && saldoTotalPrevio > plan.montoRecuperar)
-      ? `🧾 *Saldo total adeudado:* ${formatARS(saldoTotalPrevio)}\n`
-      : '';
-    cuotasDetalle = `${lineaSaldo}💰 *Monto único:* ${formatARS(plan.montoRecuperar)}`;
-  } else {
-    cuotasDetalle =
-      `💰 *Monto total a regularizar:* ${formatARS(plan.montoRecuperar)}\n` +
-      `📅 *Valor de cada cuota:* ${formatARS(plan.valorCuota)} x ${cuotas} meses`;
-  }
-
-  const prodReales = (estadoActual.productos || []).filter(p => p.tipo !== 'Honorarios de Gestión Extrajudicial');
-  const productosLista = prodReales.length
-    ? prodReales.map((p, i) => `${i + 1}. ${p.tipo}${p.numero ? `  N° ${p.numero}` : ''}`).join('\n')
-    : '(según acuerdo)';
-
-  const texto =
-`🏦 *BANCO GALICIA — Regularización de Deuda*
+function crearTextoPropuestaGalicia(plan, estado, manual = false) {
+  const primera = contextoPoliticaGalicia(manual).primeraCuota;
+  const productos = (estado.productos || []).filter(p=>p.tipo!=="Honorarios de Gestión Extrajudicial");
+  const detalleProductos = productos.length ? productos.map(p=>p.tipo+(p.numero ? " · "+p.numero : "")).join("\n") : "(según acuerdo)";
+  const condicion = plan.modalidad === "acuerdo0" ? "🏷️ TNA 0% · Sin quita"
+    : "🏷️ Descuento aplicado: "+Number(plan.porcentaje.toFixed(2))+"% · Sin interés";
+  const cuotasDetalle = detalleCuentaGalicia(plan,"importe");
+  return `🏦 *BANCO GALICIA — Regularización de Deuda*
 📋 Mora Tardía · Extrajudicial
-📆 Emisión: ${hoy} · Vence: ${getVencimiento()}
+📆 Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${getVencimientoPDF(manual ? "manualVencimiento" : "inputVencimiento")}
 
-Estimado/a${nombreDisplay}${dniDisplay},
-Le acercamos la siguiente *propuesta de pago* para regularizar su deuda con *Banco Galicia*, gestionada por *Estudio CO-RE*. Sujeta a su confirmación.
+Estimado/a *${estado.nombre || ""}* (DNI: ${estado.dni || ""}),
+Le acercamos esta propuesta de Banco Galicia, gestionada por Estudio CO-RE. Sujeta a su confirmación.
 
-📌 *PROPUESTA DE PAGO: ${plan.label.toUpperCase()}*
-${lineaCondicion}${cuotasDetalle}
+📌 *PROPUESTA DE PAGO: ${plan.cuotas} PAGO/S*
+${condicion}
+💰 *Monto total a regularizar: ${formatARS(plan.montoRecuperar)}*
+📅 *${cuotasDetalle}*
+Primera cuota / pago inicial: ${formatearFechaGalicia(primera)}
 
 📦 *Productos incluidos:*
-${productosLista}
+${detalleProductos}
 
-🏧 *DATOS DE PAGO* — total ${formatARS(plan.montoRecuperar)}, en 2 cuentas:
-1) Capital → Banco Galicia · GALICIALEG · CBU 0070686120000002247308
-Importe: *${formatARS(capitalBanco)}*${cuotas > 1 ? ` (${cuotas} de ${formatARS(capitalPorCuota)})` : ''}
-2) Honorarios 20%+IVA → Estudio CO-RE · GALICIAHONORARIOS · CBU 0070999030004062897261
-Importe: *${formatARS(honorariosAgencia)}*${cuotas > 1 ? ` (${cuotas} de ${formatARS(honPorCuota)})` : ''}
-_Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal._
+🏧 *DATOS DE PAGO — POR CUOTA / PAGO*
+En cada pago, realizar 2 transferencias:
+1) Banco Galicia · ${CUENTAS.recaudacion.alias} · CBU ${CUENTAS.recaudacion.cbu}
+Importe: *${detalleCuentaGalicia(plan,"banco")}*
+2) Honorarios 20%+IVA · Estudio CO-RE · ${CUENTAS.honorarios.alias} · CBU ${CUENTAS.honorarios.cbu}
+Importe: *${detalleCuentaGalicia(plan,"honorarios")}*
+*Los honorarios ya están incluidos en el total y en cada cuota.*
+Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal.
 
-⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
-
-  return texto;
+⚠️ Válida hasta la fecha indicada, dentro de la campaña vigente hasta el 31/10/2026.
+Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
 }
 
-/* ─────────────────────────────────────────────────────────────────
-   COPIAR WHATSAPP (Acción del botón)
-   ───────────────────────────────────────────────────────────────── */
+function planActualVigenteGalicia(cuotas) {
+  const plan = estadoActual.resultados[cuotas];
+  if (!plan) return null;
+  const deuda = parsearNumero(document.getElementById("inputDeuda").value);
+  if (!(deuda > 0)) { alert("Ingresá una deuda válida y volvé a calcular."); return null; }
+  if (aCentavos(deuda) !== aCentavos(estadoActual.deuda)) { alert("La deuda cambió. Volvé a calcular la propuesta."); return null; }
+  if (estadoActual.montoCliente) {
+    const monto = parsearNumero(document.getElementById("inputMontoCliente").value);
+    const tipo = document.querySelector('input[name="montoTipo"]:checked')?.value || "cuota";
+    if (monto !== estadoActual.montoCliente.monto || tipo !== estadoActual.montoCliente.tipo) {
+      alert("El monto disponible o su modalidad cambiaron. Volvé a calcular."); return null;
+    }
+  }
+  if (!autorizarEmisionGalicia(deuda,plan)) return null;
+  return plan;
+}
+
+function generarTextoWhatsApp(cuotas) {
+  const plan = planActualVigenteGalicia(cuotas);
+  return plan ? crearTextoPropuestaGalicia(plan,{...estadoActual,
+    nombre:document.getElementById("inputNombre").value.trim(), dni:document.getElementById("inputDni").value.trim(),
+    productos:obtenerProductos()}) : "";
+}
 function copiarWhatsApp(cuotas) {
   const texto = generarTextoWhatsApp(cuotas);
   if (!texto) {
@@ -1678,41 +1033,12 @@ function copiarWhatsApp(cuotas) {
    GENERAR ACUERDO PDF PREVIO
    ───────────────────────────────────────────────────────────────── */
 function generarPDF(cuotas) {
-  if (!estadoActual.dni || estadoActual.dni.trim() === "") {
-    alert('⚠️ Para generar el Acuerdo PDF, completá el campo "DNI del Deudor".');
-    document.getElementById("inputDni").focus();
-    return;
-  }
-  if (!estadoActual.nombre || estadoActual.nombre.trim() === "") {
-    alert('⚠️ Para generar el Acuerdo PDF, completá el campo "Nombre y Apellido".');
-    document.getElementById("inputNombre").focus();
-    return;
-  }
-
-  const plan = estadoActual.resultados[cuotas];
-  if (!plan) {
-    alert("Error: no se encontraron datos del plan.");
-    return;
-  }
-
-  generateAgreementPDF(cuotas, plan);
+  const plan = planActualVigenteGalicia(cuotas);
+  if (!plan) return;
+  const estado = estadoFormularioGalicia(estadoActual.deuda);
+  if (!estado.nombre || !estado.dni) { alert("Completá nombre y DNI."); return; }
+  generateAgreementPDF(cuotas,plan,estado);
 }
-
-/* ─────────────────────────────────────────────────────────────────
-GENERAR ACUERDO PDF (BLINDADO CON TRAMPA DE ERRORES)
-───────────────────────────────────────────────────────────────── */
-/* ─────────────────────────────────────────────────────────────────
-   GENERAR ACUERDO PDF (DISEÑO ROJO/DARK TIPO "UALÁ/ALAU")
-   ───────────────────────────────────────────────────────────────── */
-/* ─────────────────────────────────────────────────────────────────
-   GENERAR ACUERDO PDF (DISEÑO BLANCO Y NARANJA - GALICIA)
-   ───────────────────────────────────────────────────────────────── */
-/* ─────────────────────────────────────────────────────────────────
-   GENERAR ACUERDO PDF (DISEÑO BLANCO Y NARANJA - GALICIA)
-   ───────────────────────────────────────────────────────────────── */
-/* ─────────────────────────────────────────────────────────────────
-   GENERAR ACUERDO PDF (DISEÑO GALICIA + TEXTO OFICIAL DEL BANCO)
-   ───────────────────────────────────────────────────────────────── */
 function sanitizePDF(str) {
   if (typeof str !== 'string') return str;
   return str
@@ -1729,20 +1055,11 @@ function sanitizePDF(str) {
     .replace(/[^ -ÿ]/g, '');  // eliminar emojis y otros no-latin1 (rango espacio..ÿ)
 }
 
-function getVencimientoPDF(inputId = 'inputVencimiento') {
-  const input = document.getElementById(inputId);
-  if (input && input.value) {
-    // Fecha elegida por el operador
-    const [y, m, d] = input.value.split('-');
-    return new Date(y, m - 1, d).toLocaleDateString('es-AR', {
-      day: '2-digit', month: '2-digit', year: 'numeric'
-    });
-  }
-  // Auto: 48 horas hábiles
-  return calcularVencimiento48hs();
+function getVencimientoPDF(inputId = "inputVencimiento") {
+  return formatearFechaGalicia(document.getElementById(inputId)?.value || vencimientoAutomaticoGalicia());
 }
 
-function generateAgreementPDF(cuotasOrData, planOrData) {
+function generateAgreementPDF(cuotasOrData, planOrData, estadoPropuesta = estadoActual) {
   try {
     const manualData = typeof cuotasOrData === "object" && cuotasOrData !== null ? cuotasOrData : null;
     
@@ -1758,39 +1075,26 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // Patch automático: sanitizar tildes/ñ/símbolos en todos los doc.text()
     const _origDocText = doc.text.bind(doc);
     doc.text = function(txt, ...args) {
-      const clean = typeof txt === 'string' ? sanitizePDF(txt) : txt;
+      const clean = Array.isArray(txt) ? txt.map(sanitizePDF) : sanitizePDF(txt);
       return _origDocText(clean, ...args);
     };
 
-    // Variables base
-    const isManual = Boolean(manualData);
-    const plan = isManual
-      ? {
-          // manualData.capitalAcordado es el TOTAL final a pagar (honorarios ya incluidos)
-          label: manualData.cuotas === 1 ? "Emisión Manual 1 Pago" : `Emisión Manual ${manualData.cuotas} Pagos`,
-          porcentaje: manualData.deudaOriginal > 0 ? Math.round((1 - manualData.capitalAcordado / (manualData.deudaOriginal * 1.242)) * 100) : 0,
-          hab: manualData.capitalAcordado * 0.16,
-          had: manualData.capitalAcordado - manualData.capitalAcordado / 1.242,
-          valorCuota: manualData.capitalAcordado / manualData.cuotas,
-        }
-      : planOrData;
-
-    const cuotas     = isManual ? parseInt(manualData.cuotas, 10) : cuotasOrData;
-    const anticipoPDF = isManual ? (manualData.anticipo || null) : null;
-    const deudaOriginal = isManual ? manualData.deudaOriginal : estadoActual.deuda;
-    const montoFinal = isManual ? manualData.capitalAcordado : plan.montoRecuperar;
-    const nombreDeudor = isManual ? manualData.nombre : estadoActual.nombre;
-    const dniDeudor = isManual ? manualData.dni : estadoActual.dni;
-
-    // Fecha única de vencimiento: se usa tanto para la 1a cuota como para la validez de la oferta.
-    const vencUnificadoPDF = getVencimientoPDF(isManual ? 'manualVencimiento' : 'inputVencimiento');
-
-    // Desglose oficial de Capital y Honorarios (Total / 1.242)
-    const capitalBanco = montoFinal / 1.242;
-    const honorariosAgencia = montoFinal - capitalBanco;
-    const cuotasPagoPDF   = isManual ? parseInt(manualData.cuotas, 10) || 1 : (cuotasOrData || 1);
-    const capitalPorCuotaPDF   = capitalBanco / cuotasPagoPDF;
-    const honorariosPorCuotaPDF = honorariosAgencia / cuotasPagoPDF;
+const isManual = Boolean(manualData);
+    const deudaOriginal = isManual ? manualData.deudaOriginal : estadoPropuesta.deuda;
+    const plan = isManual ? (manualData.plan || {...crearPlanFijoGalicia(manualData.capitalAcordado,Number(manualData.cuotas)),
+      modalidad:"quita", tna:0, porcentaje:Math.max(0,(1-manualData.capitalAcordado/(deudaOriginal*1.242))*100)}) : planOrData;
+    if (!plan || !autorizarEmisionGalicia(deudaOriginal,plan,isManual)) return;
+    if (!isManual && aCentavos(parsearNumero(document.getElementById("inputDeuda").value)) !== aCentavos(deudaOriginal)) {
+      alert("La deuda cambió. Volvé a calcular."); return;
+    }
+    const cuotas = plan.cuotas;
+    const anticipoPDF = plan.anticipo || null;
+    const montoFinal = plan.montoRecuperar;
+    const nombreDeudor = isManual ? manualData.nombre : estadoPropuesta.nombre;
+    const dniDeudor = isManual ? manualData.dni : estadoPropuesta.dni;
+    const vencUnificadoPDF = getVencimientoPDF(isManual ? "manualVencimiento" : "inputVencimiento");
+    const primeraCuotaPDF = formatearFechaGalicia(contextoPoliticaGalicia(isManual).primeraCuota);
+    const cuotasPagoPDF = cuotas;
 
     const W = 210;
     const M = 20;
@@ -1864,7 +1168,7 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // Se listan TODOS los productos. Columnas adaptativas: 2 normalmente, 3 cuando son muchos.
     const productos = isManual
       ? (manualData.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }])
-      : (estadoActual.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }]);
+      : (estadoPropuesta.productos || [{ tipo: "Honorarios de Gestión Extrajudicial", numero: "Estudio CO-RE" }]);
 
     const nColsProd = productos.length > 8 ? 3 : 2;
     const rowHProd  = 4.8;
@@ -1905,73 +1209,31 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     // =================================================================
     // 3. BLOQUE 2: FORMA DE PAGO
     // =================================================================
-    // Datos para la cadena de cálculo
-    const deudaOrigPDF  = isManual ? (manualData.deudaOriginal || montoFinal) : estadoActual.deuda;
-    const baseConHon    = deudaOrigPDF * 1.242;
-    const montoQuitaPDF = baseConHon - montoFinal;
-    const pctQuitaPDF   = Math.round((montoQuitaPDF / baseConHon) * 100);
-    // Si no hay quita, se omite esa fila (queda feo mostrar 0%) y se sube el resto del bloque.
-    const tieneQuitaPDF = pctQuitaPDF > 0;
-    const dQ            = tieneQuitaPDF ? 0 : -6;
-
-    // Detalle del cálculo condensado (3 líneas) para que el contrato entre en una hoja.
-    const altForma = anticipoPDF ? 40 : (cuotas > 1 ? 34 : 29);
+const baseConHon = deudaOriginal * 1.242;
+    const altForma = 45;
     ensureSpace(altForma);
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(M, y, W - M * 2, altForma, 3, 3, "FD");
-
-    const col1 = M + 6;
-    const col2 = W - M - 6;
-
-    doc.setTextColor(234, 88, 12);
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "bold");
-    doc.text("CONDICIONES DEL ACUERDO", col1, y + 7);
-
-    // Línea 1: deuda original + honorarios
-    doc.setFontSize(7.5);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(90, 100, 115);
-    doc.text(`Deuda original: ${formatARS(deudaOrigPDF)}     +  Honorarios e IVA (24,2%): ${formatARS(baseConHon - deudaOrigPDF)}`, col1, y + 13);
-
-    // Línea 2: base (y quita si corresponde)
-    let l2 = `Base de cálculo: ${formatARS(baseConHon)}`;
-    if (tieneQuitaPDF) l2 += `      −  Quita (${pctQuitaPDF}%): -${formatARS(montoQuitaPDF)}`;
-    doc.text(l2, col1, y + 18);
-
-    // Línea 3: TOTAL destacado
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(22, 163, 74); // verde
-    doc.text("TOTAL A PAGAR:", col1, y + 24.5);
-    doc.text(formatARS(montoFinal), col2, y + 24.5, { align: "right" });
-
-    // Detalle de cuotas / anticipo
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(15, 23, 42);
-    doc.setFontSize(7.5);
-    if (anticipoPDF) {
-      const etqAnt = anticipoPDF.modo === 2 ? "Seña (pago inicial)" : "Anticipo (1a cuota)";
-      doc.text(`${etqAnt}: ${formatARS(anticipoPDF.anticipo)}   |   Saldo: ${formatARS(anticipoPDF.saldo)}`, col1, y + 31);
-      doc.text(`+ ${anticipoPDF.nCuotas} cuota/s del saldo de ${formatARS(anticipoPDF.cuotaValor)} c/u`, col1, y + 36);
-    } else if (cuotas > 1) {
-      const detalleCuotas = tieneQuitaPDF
-        ? `${cuotas} cuotas de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${vencUnificadoPDF}`
-        : `${cuotas} cuotas sin interés (tasa 0%) de ${formatARS(plan.valorCuota)} c/u   |   1a cuota estimada: ${vencUnificadoPDF}`;
-      doc.text(detalleCuotas, col1, y + 31);
-    }
-
-    y += altForma + GAP;
-
-    // =================================================================
-    // 4. BLOQUE 3: DATOS PARA EL PAGO (Borde Naranja)
-    // =================================================================
-    ensureSpace(50);
+    doc.setFillColor(248,250,252); doc.setDrawColor(226,232,240);
+    doc.roundedRect(M,y,W-M*2,altForma,3,3,"FD");
+    const col1 = M+6, col2 = W-M-6;
+    doc.setTextColor(234,88,12); doc.setFontSize(8); doc.setFont("helvetica","bold");
+    doc.text("CONDICIONES DEL ACUERDO",col1,y+7);
+    doc.setFont("helvetica","normal"); doc.setTextColor(71,85,105); doc.setFontSize(7.5);
+    doc.text("Deuda financiera: "+formatARS(deudaOriginal)+"  |  Base con honorarios: "+formatARS(baseConHon),col1,y+13);
+    const condicion = plan.modalidad === "acuerdo0" ? "TNA 0% - Sin quita."
+      : "Quita: "+Number(plan.porcentaje.toFixed(2))+"% - Sin interes.";
+    doc.text(condicion,col1,y+18);
+    doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(22,163,74);
+    doc.text("TOTAL A PAGAR:",col1,y+24.5);
+    doc.text(formatARS(montoFinal),col2,y+24.5,{align:"right"});
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(15,23,42);
+    doc.text(doc.splitTextToSize(detalleCuentaGalicia(plan,"importe"),W-M*2-12),col1,y+31);
+    doc.text("Primera cuota / pago inicial: "+primeraCuotaPDF,col1,y+40);
+    y += altForma+GAP;
+    ensureSpace(60);
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(234, 88, 12);
     doc.setLineWidth(0.5);
-    doc.roundedRect(M, y, W - M * 2, 50, 3, 3, "FD");
+    doc.roundedRect(M, y, W - M * 2, 60, 3, 3, "FD");
 
     doc.setTextColor(234, 88, 12);
     doc.setFontSize(8);
@@ -1982,27 +1244,9 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(71, 85, 105);
     doc.setFontSize(7.5);
 
-    // Reparto por cuenta. Cada pago se divide: monto/1.242 → Banco (capital), resto → Honorarios.
-    // Con anticipo: el anticipo es la 1a cuota y el saldo va en las cuotas restantes.
-    const antBancoPDF   = anticipoPDF ? anticipoPDF.anticipo / 1.242 : 0;
-    const antHonPDF     = anticipoPDF ? anticipoPDF.anticipo - antBancoPDF : 0;
-    const cuotaBancoPDF = anticipoPDF ? anticipoPDF.cuotaValor / 1.242 : 0;
-    const cuotaHonPDF   = anticipoPDF ? anticipoPDF.cuotaValor - cuotaBancoPDF : 0;
-
-    const etqAntCta = (anticipoPDF && anticipoPDF.modo === 2) ? "Seña" : "Anticipo";
-    const detBanco = anticipoPDF
-      ? `${etqAntCta} ${formatARS(antBancoPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaBancoPDF)}`
-      : (cuotasPagoPDF > 1 ? `${formatARS(capitalPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(capitalBanco));
-    const detHon = anticipoPDF
-      ? `${etqAntCta} ${formatARS(antHonPDF)} + ${anticipoPDF.nCuotas} cuota/s de ${formatARS(cuotaHonPDF)}`
-      : (cuotasPagoPDF > 1 ? `${formatARS(honorariosPorCuotaPDF)} x ${cuotasPagoPDF} cuotas` : formatARS(honorariosAgencia));
-
-    const textoAclaracion = anticipoPDF
-      ? `Importe por TODO CONCEPTO (deuda + honorarios). ${anticipoPDF.modo === 2 ? "La seña es un pago inicial aparte" : "El anticipo es la 1a cuota"}. En cada pago, realizar 2 transferencias:`
-      : (cuotasPagoPDF > 1
-        ? `Importe por TODO CONCEPTO (deuda + honorarios). Por cada una de las ${cuotasPagoPDF} cuotas, realizar 2 transferencias:`
-        : "Importe cancelatorio por TODO CONCEPTO (deuda + honorarios). Realizar 2 transferencias:");
-    doc.text(textoAclaracion, M + 6, y + 13);
+const detBanco = detalleCuentaGalicia(plan,"banco");
+    const detHon = detalleCuentaGalicia(plan,"honorarios");
+    doc.text("Deuda y honorarios incluidos. En cada cuota / pago, realizar estas 2 transferencias:",M+6,y+13);
 
     let subY = y + 20;
 
@@ -2010,27 +1254,27 @@ function generateAgreementPDF(cuotasOrData, planOrData) {
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`1. Banco Galicia  |  ${detBanco}`, M + 6, subY);
+    doc.text(doc.splitTextToSize(`1. Banco Galicia  |  ${detBanco}`, W - M * 2 - 12), M + 6, subY);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(7.5);
-    doc.text(`Titular: MARIA VALERIA FANDIÑO  CUIT 27-20481581-5`, M + 6, subY + 5);
-    doc.text(`CBU: ${CUENTAS.recaudacion.cbu}   ALIAS: ${CUENTAS.recaudacion.alias}`, M + 6, subY + 9);
+    doc.text(`Titular: MARIA VALERIA FANDIÑO  CUIT 27-20481581-5`, M + 6, subY + 9);
+    doc.text(`CBU: ${CUENTAS.recaudacion.cbu}   ALIAS: ${CUENTAS.recaudacion.alias}`, M + 6, subY + 13);
 
-    subY += 18;
+    subY += 22;
 
     // --- Cuenta 2: Honorarios ---
     doc.setTextColor(15, 23, 42);
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text(`2. Honorarios Estudio CO-RE  |  ${detHon}`, M + 6, subY);
+    doc.text(doc.splitTextToSize(`2. Honorarios Estudio CO-RE  |  ${detHon}`, W - M * 2 - 12), M + 6, subY);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(7.5);
-    doc.text(`Titular: MARIA VALERIA FANDIÑO  CUIT 27-20481581-5`, M + 6, subY + 5);
-    doc.text(`CBU: ${CUENTAS.honorarios.cbu}   ALIAS: ${CUENTAS.honorarios.alias}`, M + 6, subY + 9);
+    doc.text(`Titular: MARIA VALERIA FANDIÑO  CUIT 27-20481581-5`, M + 6, subY + 9);
+    doc.text(`CBU: ${CUENTAS.honorarios.cbu}   ALIAS: ${CUENTAS.honorarios.alias}`, M + 6, subY + 13);
 
-    y += 50 + GAP;
+    y += 60 + GAP;
 
     // =================================================================
     // 5. BLOQUE 4: CIERRE + VENCIMIENTO + FIRMA (unificado)
@@ -2148,6 +1392,22 @@ function initDniInput() {
    INICIALIZACIÓN
    ───────────────────────────────────────────────────────────────── */
 document.addEventListener("DOMContentLoaded", () => {
+  ["inputPrimeraCuota","manualPrimeraCuota"].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = hoyArgentina();
+    el.min = hoyArgentina();
+  });
+  ["inputVencimiento","manualVencimiento"].forEach(id => {
+    const el = document.getElementById(id);
+    el.min = hoyArgentina();
+    el.max = POLITICA_GALICIA.hasta;
+  });
+  document.getElementById("inputVencimiento").addEventListener("change",actualizarLivePreview);
+  document.getElementById("inputMontoCliente").addEventListener("input",()=>document.getElementById("gridInversoWrap").style.display="none");
+  ["acuerdoMeses0"].forEach(id =>
+    document.getElementById(id).addEventListener("input",()=>document.getElementById("acuerdoResultados").innerHTML=""));
+  actualizarEstadoPolitica();
+  actualizarModalidadManual();
   // Mostrar sección inicial
   navigateTo("calculadora");
 
@@ -2174,11 +1434,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (el) {
       el.addEventListener("keydown", (e) => {
         if (e.key === "Enter") calcularAuto();
-        document.getElementById("inputMontoCliente")?.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") calcularAuto();
-        });
       });
     }
+  });
+  document.getElementById("inputMontoCliente").addEventListener("keydown", e => {
+    if (e.key === "Enter") calcularAuto();
   });
 
   console.log("%c⬡ Estudio CO-RE — Panel de Cobranzas v2.0", "color:#ea580c;font-weight:bold;font-size:14px");
