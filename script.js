@@ -51,12 +51,12 @@ const TIPOS_PRODUCTO = [
    FORMATEADOR MONETARIO (es-AR, ARS)
    ───────────────────────────────────────────────────────────────── */
 const formatARS = (numero) => {
-  const importe = Math.round((Number(numero) || 0) * 100) / 100;
+  const importe = redondearPesoGalicia(Number(numero) || 0);
   return new Intl.NumberFormat("es-AR", {
     style:    "currency",
     currency: "ARS",
-    minimumFractionDigits: Number.isInteger(importe) ? 0 : 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   }).format(importe);
 };
 
@@ -174,13 +174,15 @@ function obtenerPlanManualGalicia() {
     if (anticipo.anticipo <= 0 || anticipo.anticipo >= total) throw Error("El anticipo/seña debe ser mayor a $0 y menor al total.");
     const saldo = crearPlanFijoGalicia((aCentavos(total)-aCentavos(anticipo.anticipo))/100, anticipo.nCuotas);
     const pagos = [repartirPagoGalicia(anticipo.anticipo), ...saldo.pagos];
+    const capitalBanco = pagos.reduce((s,p)=>s+p.banco,0);
+    const honorariosAgencia = pagos.reduce((s,p)=>s+p.honorarios,0);
     plan = {...plan, pagos, valorCuota: saldo.valorCuota, ultimaCuota: saldo.ultimaCuota,
-      capitalBanco: pagos.reduce((s,p)=>s+aCentavos(p.banco),0)/100,
-      honorariosAgencia: pagos.reduce((s,p)=>s+aCentavos(p.honorarios),0)/100, anticipo};
+      montoRecuperar: capitalBanco+honorariosAgencia, capitalBanco, honorariosAgencia,
+      anticipo: {...anticipo, anticipo: pagos[0].importe, saldo: saldo.montoRecuperar, cuotaValor: saldo.valorCuota}};
   }
   return {...plan, modalidad, tna: 0,
-    deudaConHonorarios: base, porcentaje: modalidad === "quita" ? Math.max(0, (1-total/base)*100) : 0,
-    montoDescuento: modalidad === "quita" ? base-total : 0,
+    deudaConHonorarios: base, porcentaje: modalidad === "quita" ? Math.max(0, (1-plan.montoRecuperar/base)*100) : 0,
+    montoDescuento: modalidad === "quita" ? Math.max(0,base-plan.montoRecuperar) : 0,
     label: modalidad === "quita" ? cuotas + " Pagos" : "Acuerdo " + cuotas + " meses"};
 }
 
@@ -196,7 +198,7 @@ function actualizarPreviewManual() {
   }
   const base = deuda * 1.242;
   document.getElementById("previewBase").textContent = formatARS(base);
-  document.getElementById("previewTotal").textContent = formatARS(total);
+  document.getElementById("previewTotal").textContent = formatARS(plan?.montoRecuperar ?? total);
   document.getElementById("previewDesc").textContent = plan ? (plan.modalidad === "quita" ? plan.porcentaje.toFixed(2) + "% OFF" : "TNA " + Math.round(plan.tna*100) + "%") : "—";
   const modalidad = document.getElementById("manualModalidad").value;
   const cantidad = plan?.cuotas || Number(document.getElementById("manualCuotas").value);
@@ -204,11 +206,12 @@ function actualizarPreviewManual() {
   document.getElementById("manualDescHint").textContent = !deudaValida || deuda <= 0 ? "" : limite != null
     ? "Máx. " + Math.round(limite*100) + "% de quita · mínimo " + formatARS(minimoTotalGalicia(deuda, limite)/100) : "Cantidad de pagos fuera de pauta.";
   const res = document.getElementById("anticipoResumen");
-  if (res && plan?.anticipo) res.textContent = detalleCuentaGalicia(plan, "importe") + " = " + formatARS(total);
+  if (res && plan?.anticipo) res.textContent = detalleCuentaGalicia(plan, "importe") + " = " + formatARS(plan.montoRecuperar);
   const alerta = document.getElementById("previewAlerta");
   alerta.textContent = error; alerta.style.display = error ? "block" : "none";
   const msg = document.getElementById("manualValidMsg");
-  msg.textContent = error || (plan ? detalleCuentaGalicia(plan, "importe") : "");
+  msg.textContent = error || (plan ? detalleCuentaGalicia(plan, "importe")+
+    (plan.montoRecuperar > plan.totalSinRedondeo ? " · Total con redondeo: "+formatARS(plan.montoRecuperar) : "") : "");
   msg.className = error ? "manual-valid-msg error" : "manual-valid-msg ok";
   document.getElementById("btnGenerarManual").disabled = Boolean(error) || !plan;
   document.getElementById("btnTextoManual").disabled = Boolean(error) || !plan;
@@ -405,8 +408,19 @@ function calcularAcuerdoDesdeFormulario(modalidad, emitir = null) {
 }
 
 function erroresPlanGalicia(deuda, plan, manual = false) {
-  return validarPropuestaGalicia({ deuda, cuotas: plan.cuotas, total: plan.montoRecuperar,
+  const errores = validarPropuestaGalicia({ deuda, cuotas: plan.cuotas, total: plan.montoRecuperar,
+    totalSinRedondeo: plan.totalSinRedondeo ?? plan.montoRecuperar,
     modalidad: plan.modalidad || "quita", quitaSolicitada: plan.quitaSolicitada ?? null, ...contextoPoliticaGalicia(manual) });
+  const pagos = plan.pagos || [];
+  if (pagos.length !== plan.cuotas || pagos.some(p=>
+    ![p.importe,p.banco,p.honorarios].every(n=>Number.isSafeInteger(n) && n>=0) || p.importe<=0 || p.banco+p.honorarios!==p.importe) ||
+    pagos.reduce((s,p)=>s+p.importe,0)!==plan.montoRecuperar ||
+    pagos.reduce((s,p)=>s+p.banco,0)!==plan.capitalBanco ||
+    pagos.reduce((s,p)=>s+p.honorarios,0)!==plan.honorariosAgencia ||
+    pagos[plan.anticipo ? 1 : 0]?.importe!==plan.valorCuota || pagos.at(-1)?.importe!==plan.ultimaCuota) {
+    errores.push("Los importes de banco, honorarios, cuotas y total no coinciden. Volvé a calcular.");
+  }
+  return errores;
 }
 
 function autorizarEmisionGalicia(deuda, plan, manual = false) {
@@ -462,7 +476,8 @@ function actualizarLabelMontoCliente() {
   const hint  = document.getElementById('montoClienteHint');
   if (hint) hint.textContent = tipo === 'cuota'
     ? 'El sistema buscará el descuento para cada número de cuotas'
-    : 'El sistema calculará el descuento para ese total fijo';
+    : 'El sistema calculará el descuento para ese total';
+  if (hint) hint.textContent += '. Banco y honorarios se redondean hacia arriba; el importe final puede aumentar.';
   document.getElementById("gridInversoWrap").style.display = "none";
 }
 
@@ -478,9 +493,10 @@ function calcularInverso() {
     const total = tipo === "cuota" ? aCentavos(monto)*c/100 : monto;
     const base = deuda * 1.242;
     if (aCentavos(total) < c) return {c,plan:null,errores:["El total no permite un centavo por pago."]};
-    const plan = {...crearPlanFijoGalicia(total,c), modalidad:"quita", tna:0,
-      deudaConHonorarios:base, porcentaje:Math.max(0,(1-total/base)*100),
-      montoDescuento:base-total, label:c+" Pagos"};
+    const pagos = crearPlanFijoGalicia(total,c);
+    const plan = {...pagos, modalidad:"quita", tna:0,
+      deudaConHonorarios:base, porcentaje:Math.max(0,(1-pagos.montoRecuperar/base)*100),
+      montoDescuento:Math.max(0,base-pagos.montoRecuperar), label:c+" Pagos"};
     const errores = erroresPlanGalicia(deuda,plan);
     estadoActual.resultados[c] = plan;
     return {c,plan,errores};
@@ -788,9 +804,8 @@ function copiarPropuestaCombinada() {
   const estado = estadoFormularioGalicia(deuda);
   const opciones = [..._escSeleccion.values()].map(({quita,cuotas})=>calcularPlan(deuda,cuotas,quita/100));
   if (!opciones.length || opciones.some(plan=>!autorizarEmisionGalicia(deuda,plan))) return;
-  const texto = "Banco Galicia — Estudio CO-RE\nEstimado/a "+estado.nombre+"\n\n"+
-    opciones.map((p,i)=>(i+1)+". Quita "+p.porcentaje+"% · Total "+formatARS(p.montoRecuperar)+" · "+describirPagosGalicia(p)).join("\n")+
-    "\n\nPrimera cuota: "+formatearFechaGalicia(contextoPoliticaGalicia().primeraCuota)+"\nVálida hasta "+getVencimiento()+". Honorarios incluidos.";
+  const texto = opciones.map((plan,i)=>(opciones.length > 1 ? "ALTERNATIVA "+(i+1)+"\n\n" : "")+
+    crearTextoPropuestaGalicia(plan,estado)).join("\n\n────────────\n\n");
   copiarTexto(texto);
 }
 
@@ -901,7 +916,7 @@ function eliminarProducto(id) {
 }
 
 function obtenerProductos() {
-  const filas = document.querySelectorAll(".producto-row");
+  const filas = document.querySelectorAll("#productosList .producto-row");
   const productos = [];
   filas.forEach((f) => {
     const tipo   = f.querySelector(".producto-tipo")?.value?.trim()   || "";
@@ -941,7 +956,8 @@ function renderizarResultados() {
 }
 
 function formatearFechaGalicia(iso) {
-  return fechaISOValida(iso) ? new Date(iso+"T12:00:00Z").toLocaleDateString("es-AR",{timeZone:"America/Argentina/Buenos_Aires"}) : "—";
+  return fechaISOValida(iso) ? new Date(iso+"T12:00:00Z").toLocaleDateString("es-AR",{
+    timeZone:"America/Argentina/Buenos_Aires",day:"2-digit",month:"2-digit",year:"numeric"}) : "—";
 }
 
 function vencimientoAutomaticoGalicia() {
@@ -961,39 +977,43 @@ function getVencimiento() { return getVencimientoPDF(); }
 let _countdownInterval = null;
 
 function crearTextoPropuestaGalicia(plan, estado, manual = false) {
-  const primera = contextoPoliticaGalicia(manual).primeraCuota;
   const productos = (estado.productos || []).filter(p=>p.tipo!=="Honorarios de Gestión Extrajudicial");
   const detalleProductos = productos.length ? productos.map(p=>p.tipo+(p.numero ? " · "+p.numero : "")).join("\n") : "(según acuerdo)";
   const condicion = plan.modalidad === "acuerdo0" ? "🏷️ TNA 0% · Sin quita"
-    : "🏷️ Descuento aplicado: "+Number(plan.porcentaje.toFixed(2))+"% · Sin interés";
-  const cuotasDetalle = detalleCuentaGalicia(plan,"importe");
-  return `🏦 *BANCO GALICIA — Regularización de Deuda*
+    : "🏷️ Descuento aplicado: "+Number(plan.porcentaje.toFixed(2))+"%";
+  const detalle = campo => !plan.anticipo && plan.cuotas > 1 && plan.pagos[0][campo] === plan.pagos.at(-1)[campo]
+    ? plan.cuotas+" de "+formatARS(plan.pagos[0][campo]) : detalleCuentaGalicia(plan,campo);
+  const cuota = plan.anticipo || plan.valorCuota !== plan.ultimaCuota ? "📅 Forma de pago: "+detalleCuentaGalicia(plan,"importe")
+    : plan.cuotas === 1 ? "📅 Valor del pago: "+formatARS(plan.valorCuota)
+    : "📅 Valor de cada cuota: "+formatARS(plan.valorCuota)+" x "+plan.cuotas+" meses";
+  const vencimiento = contextoPoliticaGalicia(manual).vencimiento || vencimientoAutomaticoGalicia();
+  const diaVence = new Date(vencimiento+"T12:00:00Z").toLocaleDateString("es-AR",{
+    weekday:"short",timeZone:"America/Argentina/Buenos_Aires"}).replace(/\.$/,"");
+  const validez = contextoPoliticaGalicia(manual).vencimiento || vencimiento === POLITICA_GALICIA.hasta
+    ? "Válida hasta la fecha indicada." : "Válida 48 hs hábiles.";
+  return `🏦 BANCO GALICIA — Regularización de Deuda
 📋 Mora Tardía · Extrajudicial
-📆 Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${getVencimientoPDF(manual ? "manualVencimiento" : "inputVencimiento")}
+📆 Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${diaVence}, ${formatearFechaGalicia(vencimiento)}
 
-Estimado/a *${estado.nombre || ""}* (DNI: ${estado.dni || ""}),
-Le acercamos esta propuesta de Banco Galicia, gestionada por Estudio CO-RE. Sujeta a su confirmación.
+Estimado/a ${estado.nombre || ""} (DNI: ${estado.dni || ""}),
+Le acercamos la siguiente propuesta de pago para regularizar su deuda con Banco Galicia, gestionada por Estudio CO-RE. Sujeta a su confirmación.
 
-📌 *PROPUESTA DE PAGO: ${plan.cuotas} PAGO/S*
+📌 PROPUESTA DE PAGO: ${plan.cuotas} ${plan.cuotas === 1 ? "PAGO" : "PAGOS"}
 ${condicion}
-💰 *Monto total a regularizar: ${formatARS(plan.montoRecuperar)}*
-📅 *${cuotasDetalle}*
-Primera cuota / pago inicial: ${formatearFechaGalicia(primera)}
+💰 Monto total a regularizar: ${formatARS(plan.montoRecuperar)}
+${cuota}
 
-📦 *Productos incluidos:*
+📦 Productos incluidos:
 ${detalleProductos}
 
-🏧 *DATOS DE PAGO — POR CUOTA / PAGO*
-En cada pago, realizar 2 transferencias:
-1) Banco Galicia · ${CUENTAS.recaudacion.alias} · CBU ${CUENTAS.recaudacion.cbu}
-Importe: *${detalleCuentaGalicia(plan,"banco")}*
-2) Honorarios 20%+IVA · Estudio CO-RE · ${CUENTAS.honorarios.alias} · CBU ${CUENTAS.honorarios.cbu}
-Importe: *${detalleCuentaGalicia(plan,"honorarios")}*
-*Los honorarios ya están incluidos en el total y en cada cuota.*
+🏧 DATOS DE PAGO — total ${formatARS(plan.montoRecuperar)}, en 2 cuentas:
+1) Capital → Banco Galicia · ${CUENTAS.recaudacion.alias} · CBU ${CUENTAS.recaudacion.cbu}
+Importe: ${formatARS(plan.capitalBanco)} (${detalle("banco")})
+2) Honorarios 20%+IVA → Estudio CO-RE · ${CUENTAS.honorarios.alias} · CBU ${CUENTAS.honorarios.cbu}
+Importe: ${formatARS(plan.honorariosAgencia)} (${detalle("honorarios")})
 Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal.
 
-⚠️ Válida hasta la fecha indicada, dentro de la campaña vigente hasta el 31/10/2026.
-Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
+⚠️ ${validez} Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
 }
 
 function planActualVigenteGalicia(cuotas) {
