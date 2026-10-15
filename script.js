@@ -1236,7 +1236,12 @@ const baseConHon = deudaOriginal * 1.242;
     doc.roundedRect(M,y,W-M*2,altForma,3,3,"FD");
     const col1 = M+6, col2 = W-M-6;
     doc.setTextColor(234,88,12); doc.setFontSize(8); doc.setFont("helvetica","bold");
-    doc.text("CONDICIONES DEL ACUERDO",col1,y+7);
+    const tipoPlanPDF = anticipoPDF
+      ? "PLAN DE PAGO CON "+(anticipoPDF.modo === 2 ? "SEÑA" : "ANTICIPO")+" + "+anticipoPDF.nCuotas+
+        (anticipoPDF.nCuotas === 1 ? " CUOTA MENSUAL" : " CUOTAS MENSUALES")
+      : cuotas === 1 ? "PAGO CANCELATORIO DE CONTADO"
+      : "PLAN DE PAGO EN "+cuotas+" CUOTAS MENSUALES";
+    doc.text(tipoPlanPDF,col1,y+7);
     doc.setFont("helvetica","normal"); doc.setTextColor(71,85,105); doc.setFontSize(7.5);
     doc.text("Deuda financiera: "+formatARS(deudaOriginal)+"  |  Base con honorarios: "+formatARS(baseConHon),col1,y+13);
     const condicion = plan.modalidad === "acuerdo0" ? "TNA 0% - Sin quita."
