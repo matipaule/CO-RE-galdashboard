@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2026-10-22" />
   <!-- jsPDF via CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
 </head>
@@ -790,7 +790,8 @@
   <!-- Toast notification -->
   <div class="toast" id="toast"></div>
 
-  <script src="politicas.js"></script>
-  <script src="script.js"></script>
+  <!-- ?v= obliga al navegador a bajar la versión nueva. Cambiar la fecha cada vez que se suben cambios. -->
+  <script src="politicas.js?v=2026-10-22"></script>
+  <script src="script.js?v=2026-10-22"></script>
 </body>
 </html>
