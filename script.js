@@ -154,12 +154,29 @@ function actualizarModalidadManual() {
   const max = modalidad === "acuerdo0" ? POLITICA_GALICIA.mesesAcuerdoCero
     : cuotasDisponiblesGalicia(deuda).length;
   ["manualCuotas", "anticipoCuotas"].forEach((id) => {
-    const el = document.getElementById(id), anterior = Number(el.value) || 1;
+    const el = document.getElementById(id), eraCancelacion = el.value === "cancelacion";
+    const anterior = Number(el.value) || 1;
     const limite = id === "anticipoCuotas" ? max - 1 : max;
-    el.innerHTML = Array.from({length: limite}, (_, i) => '<option value="' + (i+1) + '">' + (i+1) + ' pago/s</option>').join("");
-    el.value = Math.min(anterior, limite);
+    const cancelacion = id === "manualCuotas" ? '<option value="cancelacion">Cancelación (pago único)</option>' : "";
+    el.innerHTML = Array.from({length: limite}, (_, i) => '<option value="' + (i+1) + '">' + (i+1) + ' pago/s</option>' + (i === 0 ? cancelacion : "")).join("");
+    el.value = eraCancelacion && cancelacion ? "cancelacion" : Math.min(anterior, limite);
   });
   actualizarPreviewManual();
+}
+
+// "Cancelación" es un pago único: mismo cálculo que 1 pago, sólo cambia cómo se muestra en el PDF/texto.
+function esCancelacionManual() {
+  return !esAnticipo() && document.getElementById("manualCuotas")?.value === "cancelacion";
+}
+
+function cuotasManual() {
+  return esCancelacionManual() ? 1 : Number(document.getElementById("manualCuotas").value);
+}
+
+function actualizarLabelFechaManual() {
+  const label = document.querySelector('label[for="manualPrimeraCuota"]');
+  if (label) label.innerHTML = (esCancelacionManual() ? "Fecha de pago cancelatorio" : "Fecha del primer pago") +
+    ' <span class="label-required">*</span>';
 }
 
 function obtenerPlanManualGalicia() {
@@ -168,7 +185,7 @@ function obtenerPlanManualGalicia() {
   const modalidad = document.getElementById("manualModalidad").value || "quita";
   const base = deuda * 1.242;
   const anticipo = esAnticipo() ? getDatosAnticipo(total) : null;
-  const cuotas = anticipo ? anticipo.nCuotas + 1 : Number(document.getElementById("manualCuotas").value);
+  const cuotas = anticipo ? anticipo.nCuotas + 1 : cuotasManual();
   let plan = crearPlanFijoGalicia(total, cuotas);
   if (anticipo) {
     if (anticipo.anticipo <= 0 || anticipo.anticipo >= total) throw Error("El anticipo/seña debe ser mayor a $0 y menor al total.");
@@ -180,10 +197,11 @@ function obtenerPlanManualGalicia() {
       montoRecuperar: capitalBanco+honorariosAgencia, capitalBanco, honorariosAgencia,
       anticipo: {...anticipo, anticipo: pagos[0].importe, saldo: saldo.montoRecuperar, cuotaValor: saldo.valorCuota}};
   }
-  return {...plan, modalidad, tna: 0,
+  const cancelacion = !anticipo && esCancelacionManual();
+  return {...plan, modalidad, tna: 0, cancelacion,
     deudaConHonorarios: base, porcentaje: modalidad === "quita" ? Math.max(0, (1-plan.montoRecuperar/base)*100) : 0,
     montoDescuento: modalidad === "quita" ? Math.max(0,base-plan.montoRecuperar) : 0,
-    label: modalidad === "quita" ? cuotas + " Pagos" : "Acuerdo " + cuotas + " meses"};
+    label: cancelacion ? "Cancelación" : modalidad === "quita" ? cuotas + " Pagos" : "Acuerdo " + cuotas + " meses"};
 }
 
 function actualizarPreviewManual() {
@@ -201,7 +219,8 @@ function actualizarPreviewManual() {
   document.getElementById("previewTotal").textContent = formatARS(plan?.montoRecuperar ?? total);
   document.getElementById("previewDesc").textContent = plan ? (plan.modalidad === "quita" ? plan.porcentaje.toFixed(2) + "% OFF" : "TNA " + Math.round(plan.tna*100) + "%") : "—";
   const modalidad = document.getElementById("manualModalidad").value;
-  const cantidad = plan?.cuotas || Number(document.getElementById("manualCuotas").value);
+  actualizarLabelFechaManual();
+  const cantidad = plan?.cuotas || cuotasManual();
   const limite = modalidad === "quita" && deudaValida ? limiteQuitaGalicia(cantidad, deuda) : 0;
   document.getElementById("manualDescHint").textContent = !deudaValida || deuda <= 0 ? "" : limite != null
     ? "Máx. " + Math.round(limite*100) + "% de quita · mínimo " + formatARS(minimoTotalGalicia(deuda, limite)/100) : "Cantidad de pagos fuera de pauta.";
@@ -984,6 +1003,7 @@ function crearTextoPropuestaGalicia(plan, estado, manual = false) {
   const detalle = campo => !plan.anticipo && plan.cuotas > 1 && plan.pagos[0][campo] === plan.pagos.at(-1)[campo]
     ? plan.cuotas+" de "+formatARS(plan.pagos[0][campo]) : detalleCuentaGalicia(plan,campo);
   const cuota = plan.anticipo || plan.valorCuota !== plan.ultimaCuota ? "📅 Forma de pago: "+detalleCuentaGalicia(plan,"importe")
+    : plan.cancelacion ? "📅 Pago cancelatorio (único): "+formatARS(plan.valorCuota)
     : plan.cuotas === 1 ? "📅 Valor del pago: "+formatARS(plan.valorCuota)
     : "📅 Valor de cada cuota: "+formatARS(plan.valorCuota)+" x "+plan.cuotas+" meses";
   const vencimiento = contextoPoliticaGalicia(manual).vencimiento || vencimientoAutomaticoGalicia();
@@ -998,7 +1018,7 @@ function crearTextoPropuestaGalicia(plan, estado, manual = false) {
 Estimado/a ${estado.nombre || ""} (DNI: ${estado.dni || ""}),
 Le acercamos la siguiente propuesta de pago para regularizar su deuda con Banco Galicia, gestionada por Estudio CO-RE. Sujeta a su confirmación.
 
-📌 PROPUESTA DE PAGO: ${plan.cuotas} ${plan.cuotas === 1 ? "PAGO" : "PAGOS"}
+📌 PROPUESTA DE PAGO: ${plan.cancelacion ? "CANCELACIÓN (PAGO ÚNICO)" : plan.cuotas+" "+(plan.cuotas === 1 ? "PAGO" : "PAGOS")}
 ${condicion}
 💰 Monto total a regularizar: ${formatARS(plan.montoRecuperar)}
 ${cuota}
@@ -1239,6 +1259,7 @@ const baseConHon = deudaOriginal * 1.242;
     const tipoPlanPDF = anticipoPDF
       ? "PLAN DE PAGO CON "+(anticipoPDF.modo === 2 ? "SEÑA" : "ANTICIPO")+" + "+anticipoPDF.nCuotas+
         (anticipoPDF.nCuotas === 1 ? " CUOTA MENSUAL" : " CUOTAS MENSUALES")
+      : plan.cancelacion ? "CANCELACION TOTAL - PAGO UNICO"
       : cuotas === 1 ? "PAGO CANCELATORIO DE CONTADO"
       : "PLAN DE PAGO EN "+cuotas+" CUOTAS MENSUALES";
     doc.text(tipoPlanPDF,col1,y+7);
@@ -1252,7 +1273,7 @@ const baseConHon = deudaOriginal * 1.242;
     doc.text(formatARS(montoFinal),col2,y+24.5,{align:"right"});
     doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(15,23,42);
     doc.text(doc.splitTextToSize(detalleCuentaGalicia(plan,"importe"),W-M*2-12),col1,y+31);
-    doc.text("Primera cuota / pago inicial: "+primeraCuotaPDF,col1,y+40);
+    doc.text((plan.cancelacion ? "Cancelacion - fecha de pago: " : "Primera cuota / pago inicial: ")+primeraCuotaPDF,col1,y+40);
     y += altForma+GAP;
     ensureSpace(60);
     doc.setFillColor(255, 255, 255);
