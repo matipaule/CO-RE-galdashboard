@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=2026-10-22" />
+  <link rel="stylesheet" href="style.css?v=2026-10-22b" />
   <!-- jsPDF via CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
 </head>
@@ -544,13 +544,13 @@
             <select id="manualModalidad" class="form-input form-select" onchange="actualizarModalidadManual()">
               <option value="quita">Quita · hasta 9 pagos según deuda</option>
               <option value="acuerdo0">Acuerdo · hasta 24 meses · TNA 0%</option>
+              <option value="cancelacion">Cancelación · pago único</option>
             </select>
           </div>
           <div class="form-group" id="grpManualCuotas">
             <label class="form-label" for="manualCuotas">Cuotas</label>
             <select id="manualCuotas" class="form-input form-select">
               <option value="1">1 Pago</option>
-              <option value="cancelacion">Cancelación (pago único)</option>
               <option value="2">2 Pagos</option>
               <option value="3">3 Pagos</option>
               <option value="4">4 Pagos</option>
@@ -791,7 +791,7 @@
   <div class="toast" id="toast"></div>
 
   <!-- ?v= obliga al navegador a bajar la versión nueva. Cambiar la fecha cada vez que se suben cambios. -->
-  <script src="politicas.js?v=2026-10-22"></script>
-  <script src="script.js?v=2026-10-22"></script>
+  <script src="politicas.js?v=2026-10-22b"></script>
+  <script src="script.js?v=2026-10-22b"></script>
 </body>
 </html>

@@ -154,23 +154,32 @@ function actualizarModalidadManual() {
   const max = modalidad === "acuerdo0" ? POLITICA_GALICIA.mesesAcuerdoCero
     : cuotasDisponiblesGalicia(deuda).length;
   ["manualCuotas", "anticipoCuotas"].forEach((id) => {
-    const el = document.getElementById(id), eraCancelacion = el.value === "cancelacion";
-    const anterior = Number(el.value) || 1;
+    const el = document.getElementById(id), anterior = Number(el.value) || 1;
     const limite = id === "anticipoCuotas" ? max - 1 : max;
-    const cancelacion = id === "manualCuotas" ? '<option value="cancelacion">Cancelación (pago único)</option>' : "";
-    el.innerHTML = Array.from({length: limite}, (_, i) => '<option value="' + (i+1) + '">' + (i+1) + ' pago/s</option>' + (i === 0 ? cancelacion : "")).join("");
-    el.value = eraCancelacion && cancelacion ? "cancelacion" : Math.min(anterior, limite);
+    el.innerHTML = Array.from({length: limite}, (_, i) => '<option value="' + (i+1) + '">' + (i+1) + ' pago/s</option>').join("");
+    el.value = Math.min(anterior, limite);
   });
+  actualizarVisibilidadManual();
   actualizarPreviewManual();
 }
 
-// "Cancelación" es un pago único: mismo cálculo que 1 pago, sólo cambia cómo se muestra en el PDF/texto.
+// "Cancelación" es un pago único con quita: se calcula y valida como 1 pago en modalidad quita.
+// Sólo cambia cómo se muestra en el PDF y en el texto. No lleva cuotas ni anticipo.
 function esCancelacionManual() {
-  return !esAnticipo() && document.getElementById("manualCuotas")?.value === "cancelacion";
+  return document.getElementById("manualModalidad")?.value === "cancelacion";
 }
 
 function cuotasManual() {
   return esCancelacionManual() ? 1 : Number(document.getElementById("manualCuotas").value);
+}
+
+// Muestra "Cuotas" y "Anticipo / seña" sólo en las modalidades con cuotas.
+function actualizarVisibilidadManual() {
+  const cancelacion = esCancelacionManual();
+  const grpCuotas = document.getElementById("grpManualCuotas");
+  if (grpCuotas) grpCuotas.style.display = cancelacion || esAnticipo() ? "none" : "";
+  const anticipo = document.querySelector(".anticipo-section");
+  if (anticipo) anticipo.style.display = cancelacion ? "none" : "";
 }
 
 function actualizarLabelFechaManual() {
@@ -182,7 +191,8 @@ function actualizarLabelFechaManual() {
 function obtenerPlanManualGalicia() {
   const deuda = Number(document.getElementById("manualDeuda").value);
   const total = Number(document.getElementById("manualCapital").value);
-  const modalidad = document.getElementById("manualModalidad").value || "quita";
+  const cancelacion = esCancelacionManual();
+  const modalidad = cancelacion ? "quita" : document.getElementById("manualModalidad").value || "quita";
   const base = deuda * 1.242;
   const anticipo = esAnticipo() ? getDatosAnticipo(total) : null;
   const cuotas = anticipo ? anticipo.nCuotas + 1 : cuotasManual();
@@ -197,7 +207,6 @@ function obtenerPlanManualGalicia() {
       montoRecuperar: capitalBanco+honorariosAgencia, capitalBanco, honorariosAgencia,
       anticipo: {...anticipo, anticipo: pagos[0].importe, saldo: saldo.montoRecuperar, cuotaValor: saldo.valorCuota}};
   }
-  const cancelacion = !anticipo && esCancelacionManual();
   return {...plan, modalidad, tna: 0, cancelacion,
     deudaConHonorarios: base, porcentaje: modalidad === "quita" ? Math.max(0, (1-plan.montoRecuperar/base)*100) : 0,
     montoDescuento: modalidad === "quita" ? Math.max(0,base-plan.montoRecuperar) : 0,
@@ -218,7 +227,7 @@ function actualizarPreviewManual() {
   document.getElementById("previewBase").textContent = formatARS(base);
   document.getElementById("previewTotal").textContent = formatARS(plan?.montoRecuperar ?? total);
   document.getElementById("previewDesc").textContent = plan ? (plan.modalidad === "quita" ? plan.porcentaje.toFixed(2) + "% OFF" : "TNA " + Math.round(plan.tna*100) + "%") : "—";
-  const modalidad = document.getElementById("manualModalidad").value;
+  const modalidad = esCancelacionManual() ? "quita" : document.getElementById("manualModalidad").value;
   actualizarLabelFechaManual();
   const cantidad = plan?.cuotas || cuotasManual();
   const limite = modalidad === "quita" && deudaValida ? limiteQuitaGalicia(cantidad, deuda) : 0;
@@ -241,12 +250,11 @@ function toggleAnticipo() {
   const fields = document.getElementById("anticipoFields");
   if (fields) fields.style.display = on ? "grid" : "none";
   // Con anticipo/seña el campo "Cuotas" de arriba no aplica (el plan lo definen las cuotas del saldo).
-  const grpCuotas = document.getElementById("grpManualCuotas");
-  if (grpCuotas) grpCuotas.style.display = on ? "none" : "";
+  actualizarVisibilidadManual();
   actualizarPreviewManual();
 }
 
-function esAnticipo() { return document.getElementById("anticipoCheck")?.checked || false; }
+function esAnticipo() { return !esCancelacionManual() && (document.getElementById("anticipoCheck")?.checked || false); }
 
 // Ambos pagos iniciales cuentan dentro del máximo de pagos de la nueva pauta.
 function getModoAnticipo() {
