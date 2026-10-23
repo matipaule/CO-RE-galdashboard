@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=2026-10-22b" />
+  <link rel="stylesheet" href="style.css?v=2026-10-23a" />
   <!-- jsPDF via CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
 </head>
@@ -78,6 +78,7 @@
       <strong>Pautas Galicia · 7 al 31 de octubre de 2026</strong>
       <p>Individuos y PyMEs · Quitas sobre deuda financiera: hasta 85% contado, 80% hasta 3 pagos con primera cuota en octubre y 60% hasta 6 pagos. Hasta 9 pagos sólo con deuda mayor a $20 millones.</p>
       <p>Acuerdos: hasta 24 meses con TNA 0%, desde $10 millones de deuda financiera y 630 días de mora (ambos inclusive).</p>
+      <p>Política habitual fuera de campaña: cancelación en un solo pago, hasta 70% de quita. No aplica a planes en cuotas.</p>
       <p id="politicaEstado" role="status"></p>
     </aside>
 
@@ -158,7 +159,7 @@
             📅 Vencimiento de propuesta
           </label>
           <input type="date" id="inputVencimiento" class="vencimiento-input" />
-          <span class="vencimiento-hint">Sin fecha → 48 hs hábiles, con tope 31/10/2026</span>
+          <span class="vencimiento-hint">Sin fecha → 48 hs hábiles. Campaña de octubre: tope 31/10. Cancelatorio habitual: sin ese tope.</span>
           <button class="btn-clear-venc" onclick="document.getElementById('inputVencimiento').value=''" type="button">✕</button>
         </div>
 
@@ -217,6 +218,7 @@
             <span class="tabla-esc-title">📋 Tabla de escenarios</span>
             <span class="tabla-esc-sub">Importes por cuota según % de quita · click en una celda para seleccionar</span>
           </div>
+          <p id="tablaEscenariosPolitica" class="tabla-esc-politica" role="status" aria-live="polite"></p>
           <div id="tablaEscRefRow" class="tabla-esc-ref-row" style="display:none;">
             <span id="tablaEscRefLabel"></span>
           </div>
@@ -227,7 +229,7 @@
             </table>
           </div>
           <p class="tabla-esc-nota">
-            Importes por cuota, con honorarios incluidos. ⬜ Fuera de pauta. Primera cuota de planes de hasta 3 pagos: octubre de 2026. Quita máxima: 85% / 80% / 60%.
+            Importes por cuota, con honorarios incluidos. — Opción fuera de pauta; pasá el cursor para ver el motivo.
           </p>
         </div>
 
@@ -587,7 +589,7 @@
                 📅 Vencimiento de propuesta
               </label>
               <input type="date" id="manualVencimiento" class="vencimiento-input" />
-              <span class="vencimiento-hint">Sin fecha → 48 hs hábiles, con tope 31/10/2026</span>
+              <span class="vencimiento-hint">Sin fecha → 48 hs hábiles. Campaña de octubre: tope 31/10. Cancelatorio habitual: sin ese tope.</span>
               <button class="btn-clear-venc" onclick="document.getElementById('manualVencimiento').value=''" type="button">✕</button>
             </div>
           </div>
@@ -791,7 +793,7 @@
   <div class="toast" id="toast"></div>
 
   <!-- ?v= obliga al navegador a bajar la versión nueva. Cambiar la fecha cada vez que se suben cambios. -->
-  <script src="politicas.js?v=2026-10-22b"></script>
-  <script src="script.js?v=2026-10-22b"></script>
+  <script src="politicas.js?v=2026-10-23a"></script>
+  <script src="script.js?v=2026-10-23a"></script>
 </body>
 </html>

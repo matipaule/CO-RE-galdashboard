@@ -1,10 +1,13 @@
 "use strict";
 
-// Fuente: pautas del 07/10/2026 y ajuste del usuario del 09/10/2026.
+// Campaña: pautas del 07/10/2026 y ajuste del 09/10/2026.
+// Política habitual confirmada por supervisión vía usuario el 23/10/2026:
+// fuera de campaña, sólo cancelación en un pago, hasta 70% de quita.
 const POLITICA_GALICIA = Object.freeze({
   desde: "2026-10-07",
   hasta: "2026-10-31",
   limitesQuita: Object.freeze({ 1: .85, 2: .80, 3: .80, 4: .60, 5: .60, 6: .60, 7: .60, 8: .60, 9: .60 }),
+  quitaCancelatorioHabitual: .70,
   deudaNuevePagos: 20000000,
   deudaAcuerdoCero: 10000000,
   moraAcuerdoCero: 630,
@@ -49,10 +52,20 @@ function minimoTotalGalicia(deuda, descuento) {
   return Number(techoEntero(BigInt(aCentavos(deuda)) * 1242n * BigInt(10000 - bps), 10000000n));
 }
 
-function limiteQuitaGalicia(cuotas, deuda) {
+function esCancelatorioHabitualGalicia({ cuotas, modalidad = "quita", fecha = hoyArgentina(), primeraCuota } = {}) {
+  return modalidad === "quita" && cuotas === 1 && fechaISOValida(fecha) && fechaISOValida(primeraCuota)
+    && fecha >= POLITICA_GALICIA.desde && (fecha > POLITICA_GALICIA.hasta || primeraCuota > POLITICA_GALICIA.hasta);
+}
+
+function vencimientoMaximoGalicia(propuesta) {
+  return esCancelatorioHabitualGalicia(propuesta) ? null : POLITICA_GALICIA.hasta;
+}
+
+function limiteQuitaGalicia(cuotas, deuda, contexto = null) {
   if (!Number.isInteger(cuotas) || cuotas < 1 || cuotas > 9) return null;
   if (cuotas > 6 && aCentavos(deuda) <= aCentavos(POLITICA_GALICIA.deudaNuevePagos)) return null;
-  const limite = POLITICA_GALICIA.limitesQuita[cuotas];
+  const limite = contexto && esCancelatorioHabitualGalicia({ ...contexto, cuotas })
+    ? POLITICA_GALICIA.quitaCancelatorioHabitual : POLITICA_GALICIA.limitesQuita[cuotas];
   if (POLITICA_GALICIA.restriccionesInternasAnteriores && deuda < 250000) return Math.min(limite, .20);
   return limite;
 }
@@ -127,12 +140,15 @@ function fechaISOValida(fecha) {
 function validarPropuestaGalicia({ deuda, cuotas, total, totalSinRedondeo = total, fecha = hoyArgentina(), primeraCuota, moraDias,
   modalidad = "quita", vencimiento = null, quitaSolicitada = null }) {
   const errores = [];
-  if (!fechaISOValida(fecha) || fecha < POLITICA_GALICIA.desde || fecha > POLITICA_GALICIA.hasta) {
-    errores.push("Las pautas vigentes aplican del 07/10/2026 al 31/10/2026. Actualizá la política para emitir fuera de ese período.");
+  const contexto = { cuotas, modalidad, fecha, primeraCuota };
+  const cancelatorioHabitual = esCancelatorioHabitualGalicia(contexto);
+  const vencimientoMaximo = vencimientoMaximoGalicia(contexto);
+  if (!fechaISOValida(fecha) || fecha < POLITICA_GALICIA.desde || (fecha > POLITICA_GALICIA.hasta && !cancelatorioHabitual)) {
+    errores.push("La campaña de financiación rige del 07/10/2026 al 31/10/2026. Fuera de campaña sólo se permite cancelatorio en 1 pago con hasta 70% de quita.");
   }
   if (!fechaISOValida(primeraCuota) || primeraCuota < fecha) errores.push("Indicá una primera cuota válida, desde hoy.");
-  if (vencimiento && (!fechaISOValida(vencimiento) || vencimiento < fecha || vencimiento > POLITICA_GALICIA.hasta)) {
-    errores.push("El vencimiento debe ser desde hoy y hasta el 31/10/2026.");
+  if (vencimiento && (!fechaISOValida(vencimiento) || vencimiento < fecha || (vencimientoMaximo && vencimiento > vencimientoMaximo))) {
+    errores.push(vencimientoMaximo ? "El vencimiento debe ser desde hoy y hasta el 31/10/2026." : "El vencimiento debe ser una fecha válida, desde hoy.");
   }
   if (!Number.isFinite(deuda) || deuda <= 0 || !Number.isFinite(total) || total <= 0 || !Number.isInteger(cuotas)) {
     errores.push("Deuda, total y cantidad de pagos deben ser válidos y positivos.");
@@ -154,7 +170,7 @@ function validarPropuestaGalicia({ deuda, cuotas, total, totalSinRedondeo = tota
     if (aCentavos(totalSinRedondeo) < minimoTotalGalicia(deuda, 0)) errores.push("Estos acuerdos no incluyen quita; el total no puede ser inferior a la deuda con honorarios.");
     if (aCentavos(totalSinRedondeo) > minimoTotalGalicia(deuda, 0)) errores.push("TNA 0%: el total debe ser la deuda con honorarios, sin financiación adicional.");
   } else if (modalidad === "quita") {
-    const limite = limiteQuitaGalicia(cuotas, deuda);
+    const limite = limiteQuitaGalicia(cuotas, deuda, contexto);
     if (limite === null) errores.push("Hasta 6 pagos; de 7 a 9 pagos sólo para deuda financiera mayor a $20.000.000.");
     else if (aCentavos(totalSinRedondeo) < minimoTotalGalicia(deuda, limite)) errores.push(`El importe supera la quita máxima de ${limite * 100}% para ${cuotas} pago/s.`);
     if (quitaSolicitada !== null && (!Number.isFinite(quitaSolicitada) || quitaSolicitada < 0 || limite === null || quitaSolicitada > limite)) {
@@ -163,7 +179,6 @@ function validarPropuestaGalicia({ deuda, cuotas, total, totalSinRedondeo = tota
     if (cuotas >= 2 && cuotas <= 3 && (!primeraCuota || primeraCuota.slice(0, 7) !== "2026-10")) {
       errores.push("En planes de hasta 3 pagos, la primera cuota debe ingresarse en octubre de 2026.");
     }
-    if (cuotas === 1 && primeraCuota > POLITICA_GALICIA.hasta) errores.push("El pago contado debe ingresarse durante la vigencia de la campaña.");
     if (cuotas >= 1 && cuotas <= 9 && aCentavos(totalSinRedondeo) > aCentavos(calcularPlanGalicia(deuda, cuotas, 0).totalSinRedondeo)) {
       errores.push("El total supera la deuda con honorarios; utilizá la modalidad de acuerdo correspondiente.");
     }

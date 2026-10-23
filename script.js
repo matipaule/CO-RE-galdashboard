@@ -230,7 +230,9 @@ function actualizarPreviewManual() {
   const modalidad = esCancelacionManual() ? "quita" : document.getElementById("manualModalidad").value;
   actualizarLabelFechaManual();
   const cantidad = plan?.cuotas || cuotasManual();
-  const limite = modalidad === "quita" && deudaValida ? limiteQuitaGalicia(cantidad, deuda) : 0;
+  const contexto = { ...contextoPoliticaGalicia(true), cuotas: cantidad, modalidad };
+  const limite = modalidad === "quita" && deudaValida ? limiteQuitaGalicia(cantidad, deuda, contexto) : 0;
+  document.getElementById("manualVencimiento").max = vencimientoMaximoGalicia(contexto) || "";
   document.getElementById("manualDescHint").textContent = !deudaValida || deuda <= 0 ? "" : limite != null
     ? "Máx. " + Math.round(limite*100) + "% de quita · mínimo " + formatARS(minimoTotalGalicia(deuda, limite)/100) : "Cantidad de pagos fuera de pauta.";
   const res = document.getElementById("anticipoResumen");
@@ -400,7 +402,8 @@ function actualizarEstadoPolitica() {
   const fecha = hoyArgentina();
   const vigente = fecha >= POLITICA_GALICIA.desde && fecha <= POLITICA_GALICIA.hasta;
   const el = document.getElementById("politicaEstado");
-  el.textContent = vigente ? "Pautas vigentes · Individuos y PyMEs · hasta 31/10/2026." : "Pautas fuera de vigencia. La emisión está bloqueada hasta actualizar la política.";
+  el.textContent = vigente ? "Campaña vigente hasta 31/10/2026. Cancelatorio posterior: 1 pago, hasta 70% de quita."
+    : "Campaña de octubre fuera de vigencia. Disponible: cancelatorio en 1 pago, hasta 70% de quita. Financiación pendiente de nuevas pautas.";
   el.className = vigente ? "" : "politica-error";
   const deuda = parsearNumero(document.getElementById("inputDeuda").value);
   const mora = contextoPoliticaGalicia().moraDias;
@@ -566,7 +569,7 @@ function calcularPropuestas() {
   }
   estadoActual = estadoFormularioGalicia(deuda);
   cuotasDisponiblesGalicia(deuda).forEach(c => {
-    const limite = limiteQuitaGalicia(c,deuda);
+    const limite = limiteQuitaGalicia(c,deuda,contextoPoliticaGalicia());
     const usado = descuento === null ? limite : Math.min(descuento,limite);
     estadoActual.resultados[c] = {...PLANES[c],...calcularPlan(deuda,c,usado)};
   });
@@ -580,6 +583,13 @@ function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
   const wrap = document.getElementById("tablaEscenariosWrap");
   if (!wrap) return;
   if (!(deuda > 0)) { wrap.style.display = "none"; return; }
+  const contexto = contextoPoliticaGalicia();
+  const habitual = esCancelatorioHabitualGalicia({ ...contexto, cuotas: 1 });
+  document.getElementById("tablaEscenariosPolitica").textContent = contexto.fecha > POLITICA_GALICIA.hasta
+    ? "Campaña de octubre vencida. Disponible: cancelatorio en 1 pago, hasta 70% de quita. Las opciones en cuotas requieren nuevas pautas."
+    : habitual
+      ? "Para la fecha elegida: cancelatorio en 1 pago, hasta 70% de quita. 2 y 3 pagos requieren primera cuota en octubre. 4 a 6 pagos: hasta 60% (hasta 9 con deuda mayor a $20 millones)."
+      : "Campaña de octubre: hasta 85% en 1 pago, 80% en 2 y 3 pagos con primera cuota en octubre, y 60% de 4 a 6 pagos (hasta 9 con deuda mayor a $20 millones).";
   const columnas = cuotasDisponiblesGalicia(deuda);
   document.getElementById("tablaEscenariosHead").innerHTML = '<tr><th>% Quita</th>'+columnas.map(c=>'<th>'+c+' Pago/s</th>').join("")+'</tr>';
   const body = document.getElementById("tablaEscenariosBody");
@@ -987,7 +997,7 @@ function formatearFechaGalicia(iso) {
     timeZone:"America/Argentina/Buenos_Aires",day:"2-digit",month:"2-digit",year:"numeric"}) : "—";
 }
 
-function vencimientoAutomaticoGalicia() {
+function vencimientoAutomaticoGalicia(plan = null, manual = false) {
   const cursor = new Date();
   let horas = 48;
   while (horas > 0) {
@@ -995,7 +1005,9 @@ function vencimientoAutomaticoGalicia() {
     const dia = new Intl.DateTimeFormat("en-US",{weekday:"short",timeZone:"America/Argentina/Buenos_Aires"}).format(cursor);
     if (dia !== "Sat" && dia !== "Sun") horas--;
   }
-  return hoyArgentina(cursor) > POLITICA_GALICIA.hasta ? POLITICA_GALICIA.hasta : hoyArgentina(cursor);
+  const maximo = vencimientoMaximoGalicia({ ...contextoPoliticaGalicia(manual),
+    cuotas: plan?.cuotas, modalidad: plan?.modalidad || "quita" });
+  return maximo && hoyArgentina(cursor) > maximo ? maximo : hoyArgentina(cursor);
 }
 
 
@@ -1014,7 +1026,7 @@ function crearTextoPropuestaGalicia(plan, estado, manual = false) {
     : plan.cancelacion ? "📅 Pago cancelatorio (único): "+formatARS(plan.valorCuota)
     : plan.cuotas === 1 ? "📅 Valor del pago: "+formatARS(plan.valorCuota)
     : "📅 Valor de cada cuota: "+formatARS(plan.valorCuota)+" x "+plan.cuotas+" meses";
-  const vencimiento = contextoPoliticaGalicia(manual).vencimiento || vencimientoAutomaticoGalicia();
+  const vencimiento = contextoPoliticaGalicia(manual).vencimiento || vencimientoAutomaticoGalicia(plan, manual);
   const diaVence = new Date(vencimiento+"T12:00:00Z").toLocaleDateString("es-AR",{
     weekday:"short",timeZone:"America/Argentina/Buenos_Aires"}).replace(/\.$/,"");
   const validez = contextoPoliticaGalicia(manual).vencimiento || vencimiento === POLITICA_GALICIA.hasta
@@ -1103,8 +1115,8 @@ function sanitizePDF(str) {
     .replace(/[^ -ÿ]/g, '');  // eliminar emojis y otros no-latin1 (rango espacio..ÿ)
 }
 
-function getVencimientoPDF(inputId = "inputVencimiento") {
-  return formatearFechaGalicia(document.getElementById(inputId)?.value || vencimientoAutomaticoGalicia());
+function getVencimientoPDF(inputId = "inputVencimiento", plan = null) {
+  return formatearFechaGalicia(document.getElementById(inputId)?.value || vencimientoAutomaticoGalicia(plan, inputId === "manualVencimiento"));
 }
 
 function generateAgreementPDF(cuotasOrData, planOrData, estadoPropuesta = estadoActual) {
@@ -1140,7 +1152,7 @@ const isManual = Boolean(manualData);
     const montoFinal = plan.montoRecuperar;
     const nombreDeudor = isManual ? manualData.nombre : estadoPropuesta.nombre;
     const dniDeudor = isManual ? manualData.dni : estadoPropuesta.dni;
-    const vencUnificadoPDF = getVencimientoPDF(isManual ? "manualVencimiento" : "inputVencimiento");
+    const vencUnificadoPDF = getVencimientoPDF(isManual ? "manualVencimiento" : "inputVencimiento", plan);
     const primeraCuotaPDF = formatearFechaGalicia(contextoPoliticaGalicia(isManual).primeraCuota);
     const cuotasPagoPDF = cuotas;
 
@@ -1454,7 +1466,9 @@ document.addEventListener("DOMContentLoaded", () => {
   ["inputVencimiento","manualVencimiento"].forEach(id => {
     const el = document.getElementById(id);
     el.min = hoyArgentina();
-    el.max = POLITICA_GALICIA.hasta;
+    // El validador aplica el tope de campaña según el plan; el cancelatorio
+    // habitual puede vencer fuera de octubre.
+    el.max = "";
   });
   document.getElementById("inputVencimiento").addEventListener("change",actualizarLivePreview);
   document.getElementById("inputMontoCliente").addEventListener("input",()=>document.getElementById("gridInversoWrap").style.display="none");
