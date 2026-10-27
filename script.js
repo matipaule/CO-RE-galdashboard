@@ -232,7 +232,6 @@ function actualizarPreviewManual() {
   const cantidad = plan?.cuotas || cuotasManual();
   const contexto = { ...contextoPoliticaGalicia(true), cuotas: cantidad, modalidad };
   const limite = modalidad === "quita" && deudaValida ? limiteQuitaGalicia(cantidad, deuda, contexto) : 0;
-  document.getElementById("manualVencimiento").max = vencimientoMaximoGalicia(contexto) || "";
   document.getElementById("manualDescHint").textContent = !deudaValida || deuda <= 0 ? "" : limite != null
     ? "Máx. " + Math.round(limite*100) + "% de quita · mínimo " + formatARS(minimoTotalGalicia(deuda, limite)/100) : "Cantidad de pagos fuera de pauta.";
   const res = document.getElementById("anticipoResumen");
@@ -438,9 +437,17 @@ function calcularAcuerdoDesdeFormulario(modalidad, emitir = null) {
 }
 
 function erroresPlanGalicia(deuda, plan, manual = false) {
+  const contexto = contextoPoliticaGalicia(manual);
   const errores = validarPropuestaGalicia({ deuda, cuotas: plan.cuotas, total: plan.montoRecuperar,
     totalSinRedondeo: plan.totalSinRedondeo ?? plan.montoRecuperar,
-    modalidad: plan.modalidad || "quita", quitaSolicitada: plan.quitaSolicitada ?? null, ...contextoPoliticaGalicia(manual) });
+    modalidad: plan.modalidad || "quita", quitaSolicitada: plan.quitaSolicitada ?? null, ...contexto });
+  // El calendario manual no se recorta: con vencimiento posterior a octubre y pago en
+  // octubre, indicar cómo aplica el cancelatorio habitual sin cambiar fechas ni montos.
+  if (manual && plan.cuotas === 1 && plan.modalidad === "quita" && contexto.vencimiento > POLITICA_GALICIA.hasta
+    && contexto.primeraCuota <= POLITICA_GALICIA.hasta) {
+    errores.push("Si el pago es en noviembre, cambiá «" + (plan.cancelacion ? "Fecha de pago cancelatorio" : "Fecha del primer pago") +
+      "» a noviembre: el tope autorizado es 70% de quita en un pago.");
+  }
   const pagos = plan.pagos || [];
   if (pagos.length !== plan.cuotas || pagos.some(p=>
     ![p.importe,p.banco,p.honorarios].every(n=>Number.isSafeInteger(n) && n>=0) || p.importe<=0 || p.banco+p.honorarios!==p.importe) ||
