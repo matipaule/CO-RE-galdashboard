@@ -400,9 +400,10 @@ function contextoPoliticaGalicia(manual = false) {
 function actualizarEstadoPolitica() {
   const fecha = hoyArgentina();
   const vigente = fecha >= POLITICA_GALICIA.desde && fecha <= POLITICA_GALICIA.hasta;
+  const fin = fechaTextoGalicia(POLITICA_GALICIA.hasta);
   const el = document.getElementById("politicaEstado");
-  el.textContent = vigente ? "Campaña vigente hasta 31/10/2026. Cancelatorio posterior: 1 pago, hasta 70% de quita."
-    : "Campaña de octubre fuera de vigencia. Disponible: cancelatorio en 1 pago, hasta 70% de quita. Financiación pendiente de nuevas pautas.";
+  el.textContent = vigente ? "Campaña vigente hasta "+fin+". Cancelatorio posterior: 1 pago, hasta 70% de quita."
+    : "Campaña fuera de vigencia (del "+fechaTextoGalicia(POLITICA_GALICIA.desde)+" al "+fin+"). Disponible: cancelatorio en 1 pago, hasta 70% de quita. Financiación pendiente de nuevas pautas.";
   el.className = vigente ? "" : "politica-error";
   const deuda = parsearNumero(document.getElementById("inputDeuda").value);
   const mora = contextoPoliticaGalicia().moraDias;
@@ -441,12 +442,14 @@ function erroresPlanGalicia(deuda, plan, manual = false) {
   const errores = validarPropuestaGalicia({ deuda, cuotas: plan.cuotas, total: plan.montoRecuperar,
     totalSinRedondeo: plan.totalSinRedondeo ?? plan.montoRecuperar,
     modalidad: plan.modalidad || "quita", quitaSolicitada: plan.quitaSolicitada ?? null, ...contexto });
-  // El calendario manual no se recorta: con vencimiento posterior a octubre y pago en
-  // octubre, indicar cómo aplica el cancelatorio habitual sin cambiar fechas ni montos.
+  // El calendario manual no se recorta: con vencimiento posterior al fin de campaña y pago
+  // dentro de ella, indicar cómo aplica el cancelatorio habitual sin cambiar fechas ni montos.
   if (manual && plan.cuotas === 1 && plan.modalidad === "quita" && contexto.vencimiento > POLITICA_GALICIA.hasta
     && contexto.primeraCuota <= POLITICA_GALICIA.hasta) {
-    errores.push("Si el pago es en noviembre, cambiá «" + (plan.cancelacion ? "Fecha de pago cancelatorio" : "Fecha del primer pago") +
-      "» a noviembre: el tope autorizado es 70% de quita en un pago.");
+    const fin = fechaTextoGalicia(POLITICA_GALICIA.hasta);
+    errores.push("Vencimiento posterior al " + fin + ": si el pago también es posterior, cambiá «" +
+      (plan.cancelacion ? "Fecha de pago cancelatorio" : "Fecha del primer pago") +
+      "» a esa fecha (fuera de campaña, tope 70% de quita en un pago); si no, elegí un vencimiento hasta el " + fin + ".");
   }
   const pagos = plan.pagos || [];
   if (pagos.length !== plan.cuotas || pagos.some(p=>
@@ -592,11 +595,12 @@ function renderizarTablaEscenarios(deuda, refMonto = null, refTipo = null) {
   if (!(deuda > 0)) { wrap.style.display = "none"; return; }
   const contexto = contextoPoliticaGalicia();
   const habitual = esCancelatorioHabitualGalicia({ ...contexto, cuotas: 1 });
+  const fin = fechaTextoGalicia(POLITICA_GALICIA.hasta);
   document.getElementById("tablaEscenariosPolitica").textContent = contexto.fecha > POLITICA_GALICIA.hasta
-    ? "Campaña de octubre vencida. Disponible: cancelatorio en 1 pago, hasta 70% de quita. Las opciones en cuotas requieren nuevas pautas."
+    ? "Campaña vencida el "+fin+". Disponible: cancelatorio en 1 pago, hasta 70% de quita. Las opciones en cuotas requieren nuevas pautas."
     : habitual
-      ? "Para la fecha elegida: cancelatorio en 1 pago, hasta 70% de quita. 2 y 3 pagos requieren primera cuota en octubre. 4 a 6 pagos: hasta 60% (hasta 9 con deuda mayor a $20 millones)."
-      : "Campaña de octubre: hasta 85% en 1 pago, 80% en 2 y 3 pagos con primera cuota en octubre, y 60% de 4 a 6 pagos (hasta 9 con deuda mayor a $20 millones).";
+      ? "Para la fecha elegida: cancelatorio en 1 pago, hasta 70% de quita. 2 y 3 pagos requieren primera cuota hasta el "+fin+". 4 a 6 pagos: hasta 60% (hasta 9 con deuda mayor a $20 millones)."
+      : "Campaña hasta el "+fin+": hasta 85% en 1 pago, 80% en 2 y 3 pagos con primera cuota hasta el "+fin+", y 60% de 4 a 6 pagos (hasta 9 con deuda mayor a $20 millones).";
   const columnas = cuotasDisponiblesGalicia(deuda);
   document.getElementById("tablaEscenariosHead").innerHTML = '<tr><th>% Quita</th>'+columnas.map(c=>'<th>'+c+' Pago/s</th>').join("")+'</tr>';
   const body = document.getElementById("tablaEscenariosBody");
@@ -1474,7 +1478,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const el = document.getElementById(id);
     el.min = hoyArgentina();
     // El validador aplica el tope de campaña según el plan; el cancelatorio
-    // habitual puede vencer fuera de octubre.
+    // habitual puede vencer después del fin de campaña.
     el.max = "";
   });
   document.getElementById("inputVencimiento").addEventListener("change",actualizarLivePreview);

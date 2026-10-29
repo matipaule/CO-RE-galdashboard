@@ -260,10 +260,10 @@ test("TNA 20 y 36 meses desaparecen de la UI y no se pueden exportar con valores
   assert.match(alertas.join(" "),/inválida/);
 });
 
-test("fecha de octubre y cambios de deuda se verifican de nuevo al exportar",()=>{
+test("fecha de campaña y cambios de deuda se verifican de nuevo al exportar",()=>{
   const {api,el,pdfs,alertas}=cargar();
   api.calcularPropuestas();
-  el("inputPrimeraCuota").value="2026-11-01";
+  el("inputPrimeraCuota").value="2027-01-01";
   assert.equal(api.generarTextoWhatsApp(3),"");
   assert.notEqual(api.generarTextoWhatsApp(6),"");
   el("inputPrimeraCuota").value="2026-10-09"; el("inputDeuda").value="7000000";
@@ -271,15 +271,15 @@ test("fecha de octubre y cambios de deuda se verifican de nuevo al exportar",()=
   assert.match(alertas.at(-1),/cambió/);
 });
 
-test("primera fecha en noviembre habilita cancelatorio al 70 y explica los plazos en la tabla",()=>{
-  const {api,el,textos,pdfs}=cargar("2026-10-23T15:00:00Z");
-  el("inputDeuda").value="1000000"; el("inputPrimeraCuota").value="2026-11-05";
+test("primera fecha en enero de 2027 habilita cancelatorio al 70 y explica los plazos en la tabla",()=>{
+  const {api,el,textos,pdfs}=cargar("2026-12-28T15:00:00Z");
+  el("inputDeuda").value="1000000"; el("inputPrimeraCuota").value="2027-01-05";
   api.renderizarTablaEscenarios(1000000);
   const filas=el("tablaEscenariosBody").children;
   assert.match(filas.find(tr=>tr.dataset.quita===70).children[1].textContent,/372\.600/);
   assert.equal(filas.find(tr=>tr.dataset.quita===75).children[1].textContent,"—");
   assert.match(el("tablaEscenariosPolitica").textContent,/1 pago.*70%/);
-  assert.match(el("tablaEscenariosPolitica").textContent,/2 y 3.*octubre/);
+  assert.match(el("tablaEscenariosPolitica").textContent,/2 y 3.*31\/12\/2026/);
   api.calcularPropuestas();
   assert.equal(api.estado().resultados[1].porcentaje,70);
   assert.match(api.generarTextoWhatsApp(1),/70%/);
@@ -289,19 +289,19 @@ test("primera fecha en noviembre habilita cancelatorio al 70 y explica los plazo
   assert.equal(textos.length,1); assert.equal(pdfs.length,1);
 });
 
-test("en noviembre cancelatorio funciona en automático, inversa y manual con vencimiento vigente",()=>{
-  const f=cargar("2026-11-02T15:00:00Z");
+test("en enero de 2027 cancelatorio funciona en automático, inversa y manual con vencimiento vigente",()=>{
+  const f=cargar("2027-01-04T15:00:00Z");
   for(const prefijo of ["input","manual"]) {
     f.el(prefijo+"Deuda").value="1000000";
-    f.el(prefijo+"PrimeraCuota").value="2026-11-05";
+    f.el(prefijo+"PrimeraCuota").value="2027-01-05";
   }
   f.api.actualizarEstadoPolitica();
   assert.match(f.el("politicaEstado").textContent,/cancelatori.*70%/i);
   f.api.calcularPropuestas();
   const texto=f.api.generarTextoWhatsApp(1);
-  assert.match(texto,/70%/); assert.match(texto,/Vence: mié, 04\/11\/2026/);
+  assert.match(texto,/70%/); assert.match(texto,/Vence: mié, 06\/01\/2027/);
   f.api.generarPDF(1); assert.equal(f.pdfs.length,1);
-  assert.match(f.pdfs[0].texto,/04\/11\/2026/);
+  assert.match(f.pdfs[0].texto,/06\/01\/2027/);
   f.el("inputMontoCliente").value="372600"; f.api.calcularInverso();
   assert.notEqual(f.api.generarTextoWhatsApp(1),"");
   f.el("manualCuotas").value="1"; f.el("manualCapital").value="372600";
@@ -309,7 +309,7 @@ test("en noviembre cancelatorio funciona en automático, inversa y manual con ve
   assert.match(f.el("manualDescHint").textContent,/Máx\. 70%/);
   assert.equal(f.el("manualVencimiento").max,"");
   f.api.generarTextoManual(); f.api.generarPdfManual();
-  assert.match(f.textos.at(-1),/04\/11\/2026/);
+  assert.match(f.textos.at(-1),/06\/01\/2027/);
   assert.equal(f.pdfs.length,2); assert.deepEqual(f.alertas,[]);
   f.el("manualCapital").value="310500";
   f.api.actualizarPreviewManual(); f.api.generarTextoManual(); f.api.generarPdfManual();
@@ -339,10 +339,10 @@ test("modalidad Cancelación del repositorio emite un pago único aunque queden 
   assert.equal(api.obtenerPlanManualGalicia().cuotas,6);
 });
 
-test("modalidad Cancelación conserva el tope de noviembre y vencimiento en WhatsApp y PDF",()=>{
-  const {api,el,textos,pdfs}=cargar("2026-11-02T15:00:00Z");
+test("modalidad Cancelación conserva el tope habitual de enero y vencimiento en WhatsApp y PDF",()=>{
+  const {api,el,textos,pdfs}=cargar("2027-01-04T15:00:00Z");
   el("manualModalidad").value="cancelacion"; el("manualDeuda").value="1000000";
-  el("manualCapital").value="372600"; el("manualPrimeraCuota").value="2026-11-05";
+  el("manualCapital").value="372600"; el("manualPrimeraCuota").value="2027-01-05";
   api.actualizarModalidadManual();
   assert.equal(el("btnTextoManual").disabled,false);
   assert.match(el("manualDescHint").textContent,/Máx\. 70%/);
@@ -350,60 +350,160 @@ test("modalidad Cancelación conserva el tope de noviembre y vencimiento en What
   api.generarTextoManual(); api.generarPdfManual();
   assert.equal(textos.length,1); assert.equal(pdfs.length,1);
   assert.match(textos[0],/CANCELACIÓN \(PAGO ÚNICO\)/);
-  assert.match(textos[0],/04\/11\/2026/); assert.match(pdfs[0].texto,/04\/11\/2026/);
+  assert.match(textos[0],/06\/01\/2027/); assert.match(pdfs[0].texto,/06\/01\/2027/);
   el("manualCapital").value="310500";
   api.actualizarPreviewManual(); api.generarTextoManual(); api.generarPdfManual();
   assert.equal(el("btnGenerarManual").disabled,true);
   assert.equal(textos.length,1); assert.equal(pdfs.length,1);
 });
 
-test("cancelación manual: vencimiento de noviembre con pago de octubre se explica y pago de noviembre emite al 70",()=>{
-  const {api,el,textos,pdfs,alertas}=cargar("2026-10-27T15:00:00Z");
+test("cancelación manual: vencimiento de enero con pago de diciembre se explica y pago de enero emite al 70",()=>{
+  const {api,el,textos,pdfs,alertas}=cargar("2026-12-28T15:00:00Z");
   el("manualModalidad").value="cancelacion"; el("manualDeuda").value="1000000";
-  el("manualCapital").value="372600"; el("manualPrimeraCuota").value="2026-10-27";
-  el("manualVencimiento").value="2026-11-03";
+  el("manualCapital").value="372600"; el("manualPrimeraCuota").value="2026-12-28";
+  el("manualVencimiento").value="2027-01-05";
   api.actualizarModalidadManual();
   assert.equal(el("manualVencimiento").max,"");
   assert.equal(el("btnGenerarManual").disabled,true);
-  assert.match(el("manualValidMsg").textContent,/«Fecha de pago cancelatorio» a noviembre.*70%/);
-  assert.equal(el("manualPrimeraCuota").value,"2026-10-27"); assert.equal(el("manualCapital").value,"372600");
+  assert.match(el("manualValidMsg").textContent,/posterior al 31\/12\/2026.*«Fecha de pago cancelatorio».*70%.*hasta el 31\/12\/2026/);
+  assert.doesNotMatch(el("manualValidMsg").textContent,/noviembre|31\/10/);
+  assert.equal(el("manualPrimeraCuota").value,"2026-12-28"); assert.equal(el("manualCapital").value,"372600");
   api.generarPdfManual(); assert.equal(pdfs.length,0);
-  assert.match(alertas.at(-1),/«Fecha de pago cancelatorio» a noviembre/);
-  el("manualPrimeraCuota").value="2026-11-05"; api.actualizarPreviewManual();
+  assert.match(alertas.at(-1),/«Fecha de pago cancelatorio»/);
+  el("manualPrimeraCuota").value="2027-01-07"; api.actualizarPreviewManual();
   assert.equal(el("btnGenerarManual").disabled,false);
   assert.match(el("manualDescHint").textContent,/Máx\. 70%/);
   api.generarTextoManual(); api.generarPdfManual();
   assert.equal(textos.length,1); assert.equal(pdfs.length,1);
-  assert.match(textos[0],/CANCELACIÓN \(PAGO ÚNICO\)/); assert.match(textos[0],/03\/11\/2026/);
+  assert.match(textos[0],/CANCELACIÓN \(PAGO ÚNICO\)/); assert.match(textos[0],/05\/01\/2027/);
   assert.match(pdfs[0].texto,/CANCELACION TOTAL - PAGO UNICO/); assert.match(pdfs[0].texto,/372\.600/);
-  assert.match(pdfs[0].texto,/05\/11\/2026/); assert.match(pdfs[0].texto,/03\/11\/2026/);
-  // 75% y 85% siguen bloqueados con pago en noviembre, y 85% con vencimiento fuera de octubre.
-  for (const [pago,capital] of [["2026-11-05","310500"],["2026-11-05","186300"],["2026-10-27","186300"]]) {
+  assert.match(pdfs[0].texto,/07\/01\/2027/); assert.match(pdfs[0].texto,/05\/01\/2027/);
+  // 75% y 85% siguen bloqueados con pago en enero, y 85% con vencimiento fuera de campaña.
+  for (const [pago,capital] of [["2027-01-07","310500"],["2027-01-07","186300"],["2026-12-28","186300"]]) {
     el("manualPrimeraCuota").value=pago; el("manualCapital").value=capital; api.actualizarPreviewManual();
     assert.equal(el("btnGenerarManual").disabled,true);
     api.generarTextoManual(); api.generarPdfManual();
     assert.equal(textos.length,1); assert.equal(pdfs.length,1);
   }
-  // Financiación: no se extiende a noviembre ni por pago ni por vencimiento.
+  // Con vencimiento dentro de campaña, el pago de diciembre emite al 85%.
+  el("manualVencimiento").value="2026-12-31"; api.actualizarPreviewManual();
+  assert.equal(el("btnGenerarManual").disabled,false);
+  assert.match(el("manualDescHint").textContent,/Máx\. 85%/);
+  api.generarPdfManual(); assert.equal(pdfs.length,2); assert.match(pdfs[1].texto,/31\/12\/2026/);
+  el("manualVencimiento").value="2027-01-05";
+  // Financiación: no se extiende a enero ni por pago ni por vencimiento.
   el("manualModalidad").value="quita"; el("manualCuotas").value="2"; el("manualCapital").value="248400";
-  for (const [pago,venc] of [["2026-11-05","2026-11-03"],["2026-10-27","2026-11-03"]]) {
+  for (const [pago,venc] of [["2027-01-07","2027-01-05"],["2026-12-28","2027-01-05"]]) {
     el("manualPrimeraCuota").value=pago; el("manualVencimiento").value=venc; api.actualizarModalidadManual();
     assert.equal(el("btnGenerarManual").disabled,true);
     assert.doesNotMatch(el("manualValidMsg").textContent,/Fecha de pago cancelatorio/);
     api.generarTextoManual(); api.generarPdfManual();
-    assert.equal(textos.length,1); assert.equal(pdfs.length,1);
+    assert.equal(textos.length,1); assert.equal(pdfs.length,2);
   }
 });
 
 test("campaña expirada bloquea normal, combinado, manual y acuerdos",()=>{
-  const {api,el,textos,pdfs}=cargar("2026-11-01T15:00:00Z");
-  el("inputPrimeraCuota").value="2026-11-01"; el("manualPrimeraCuota").value="2026-11-01";
+  const {api,el,textos,pdfs}=cargar("2027-01-04T15:00:00Z");
+  el("inputPrimeraCuota").value="2027-01-04"; el("manualPrimeraCuota").value="2027-01-04";
+  api.actualizarEstadoPolitica();
+  assert.match(el("politicaEstado").textContent,/fuera de vigencia.*31\/12\/2026/);
   api.calcularPropuestas(); assert.equal(api.generarTextoWhatsApp(6),""); api.generarPDF(6);
   api.seleccion.set("60_6",{quita:60,cuotas:6}); api.copiarPropuestaCombinada();
   api.generarTextoManual(); api.generarPdfManual();
   el("inputDeuda").value="10000000"; el("inputMora").value="630";
   api.calcularAcuerdoDesdeFormulario("acuerdo0","pdf");
   assert.equal(textos.length,0); assert.equal(pdfs.length,0);
+});
+
+for (const [instante,dia,vence] of [["2026-11-16T15:00:00Z","2026-11-16","mié, 18/11/2026"],["2026-12-01T15:00:00Z","2026-12-01","jue, 03/12/2026"]]) {
+  test(`prórroga ${dia}: normal, tabla, selección, combinado, WhatsApp y PDF emiten 85/80/60`,()=>{
+    const f=cargar(instante);
+    f.el("inputPrimeraCuota").value=dia; f.el("manualPrimeraCuota").value=dia;
+    f.api.actualizarEstadoPolitica();
+    assert.match(f.el("politicaEstado").textContent,/vigente hasta 31\/12\/2026/);
+    f.api.calcularPropuestas();
+    const r=f.api.estado().resultados;
+    assert.deepEqual([1,2,3,4,5,6].map(c=>r[c].porcentaje),[85,80,80,60,60,60]);
+    assert.match(f.el("monto6").textContent,/3\.185\.022/);
+    for(const c of [1,2,3,6]) {
+      const texto=f.api.generarTextoWhatsApp(c);
+      assert.match(texto,new RegExp("Vence: "+vence.replace(/\//g,"\\/")),c+" pagos");
+      assert.match(texto,/Válida 48 hs hábiles/);
+      f.api.generarPDF(c);
+    }
+    assert.equal(f.pdfs.length,4); assert.deepEqual(f.alertas,[]);
+    assert.match(f.pdfs[0].texto,/PAGO CANCELATORIO DE CONTADO/);
+    assert.match(f.pdfs[3].texto,new RegExp(vence.slice(5).replace(/\//g,"\\/")));
+    f.api.renderizarTablaEscenarios(6411073);
+    assert.match(f.el("tablaEscenariosPolitica").textContent,/85%.*80% en 2 y 3.*31\/12\/2026/);
+    const filas=f.el("tablaEscenariosBody").children, fila=q=>filas.find(tr=>tr.dataset.quita===q);
+    assert.notEqual(fila(85).children[1].textContent,"—");
+    assert.notEqual(fila(80).children[3].textContent,"—");
+    assert.notEqual(fila(60).children[6].textContent,"—");
+    assert.equal(fila(85).children[2].textContent,"—");
+    f.api.copiarWASeleccion(85,1); f.api.copiarWASeleccion(80,3); f.api.generarPDFDesdeSeleccion(80,2);
+    f.api.seleccion.set("85_1",{quita:85,cuotas:1}); f.api.seleccion.set("80_3",{quita:80,cuotas:3}); f.api.seleccion.set("60_6",{quita:60,cuotas:6});
+    f.api.copiarPropuestaCombinada();
+    assert.equal(f.textos.length,3); assert.equal(f.pdfs.length,5);
+    assert.match(f.textos[1],/80%/); assert.equal(f.textos[2].match(/Monto total a regularizar/g).length,3);
+    // Primera cuota de 2 y 3 pagos en enero de 2027: bloqueada aun emitiendo en campaña.
+    f.el("inputPrimeraCuota").value="2027-01-04";
+    assert.equal(f.api.generarTextoWhatsApp(3),""); assert.notEqual(f.api.generarTextoWhatsApp(6),"");
+  });
+
+  test(`prórroga ${dia}: inversa, manual, Cancelación y TNA 0 emiten con vencimiento vigente`,()=>{
+    const f=cargar(instante);
+    for(const prefijo of ["input","manual"]) { f.el(prefijo+"Deuda").value="1000000"; f.el(prefijo+"PrimeraCuota").value=dia; }
+    f.el("inputMontoCliente").value="186300"; f.api.calcularInverso();
+    assert.match(f.api.generarTextoWhatsApp(1),/85%/);
+    f.el("inputMontoCliente").value="248400"; f.api.calcularInverso();
+    assert.match(f.api.generarTextoWhatsApp(2),/80%/); assert.match(f.api.generarTextoWhatsApp(3),/80%/);
+    assert.equal(f.api.generarTextoWhatsApp(4),"");
+    for(const [cuotas,capital,max] of [["1","186300",85],["2","248400",80],["3","248400",80],["6","496800",60]]) {
+      f.el("manualCuotas").value=cuotas; f.el("manualCapital").value=capital; f.api.actualizarPreviewManual();
+      assert.match(f.el("manualDescHint").textContent,new RegExp("Máx\\. "+max+"%"));
+      assert.equal(f.el("btnGenerarManual").disabled,false,cuotas+" pagos");
+      f.el("manualCapital").value=String(Number(capital)-1); f.api.actualizarPreviewManual();
+      assert.equal(f.el("btnGenerarManual").disabled,true,cuotas+" pagos bajo mínimo");
+    }
+    f.el("manualModalidad").value="cancelacion"; f.el("manualCapital").value="186300"; f.api.actualizarModalidadManual();
+    assert.equal(f.el("btnGenerarManual").disabled,false);
+    f.api.generarTextoManual(); f.api.generarPdfManual();
+    assert.match(f.textos.at(-1),/CANCELACIÓN \(PAGO ÚNICO\)/); assert.match(f.textos.at(-1),new RegExp(vence.slice(5).replace(/\//g,"\\/")));
+    assert.match(f.pdfs.at(-1).texto,/CANCELACION TOTAL - PAGO UNICO/);
+    f.el("manualVencimiento").value="2026-12-31"; f.api.generarPdfManual();
+    assert.match(f.pdfs.at(-1).texto,/31\/12\/2026/);
+    f.el("manualVencimiento").value="2027-01-01"; f.api.actualizarPreviewManual();
+    assert.equal(f.el("btnGenerarManual").disabled,true);
+    f.el("manualVencimiento").value="";
+    f.el("inputDeuda").value="10000000"; f.el("inputMora").value="630";
+    f.api.calcularAcuerdoDesdeFormulario("acuerdo0","texto"); f.api.calcularAcuerdoDesdeFormulario("acuerdo0","pdf");
+    assert.match(f.textos.at(-1),/517\.501 x 24 meses/); assert.match(f.pdfs.at(-1).texto,/TNA 0%/);
+    f.el("manualModalidad").value="acuerdo0"; f.el("manualDeuda").value="10000000";
+    f.el("manualMora").value="630"; f.el("manualCuotas").value="24"; f.el("manualCapital").value="12420000";
+    f.api.actualizarModalidadManual(); f.api.generarPdfManual();
+    assert.equal(f.pdfs.length,4);
+    // Único aviso: el bloqueo buscado de 4 pagos al 80% en la inversa.
+    assert.equal(f.alertas.length,1); assert.match(f.alertas[0],/60% para 4 pago/);
+  });
+}
+
+test("prórroga: el 31/12 es inclusivo y el vencimiento automático se recorta a esa fecha",()=>{
+  const fin=cargar("2026-12-31T15:00:00Z");
+  fin.el("inputPrimeraCuota").value="2026-12-31"; fin.api.calcularPropuestas();
+  assert.equal(fin.api.estado().resultados[3].porcentaje,80);
+  assert.match(fin.api.generarTextoWhatsApp(3),/Vence: jue, 31\/12\/2026/);
+  fin.api.generarPDF(1); assert.equal(fin.pdfs.length,1);
+  const enero=cargar("2027-01-01T15:00:00Z");
+  enero.el("inputPrimeraCuota").value="2027-01-01"; enero.api.calcularPropuestas();
+  assert.equal(enero.api.estado().resultados[1].porcentaje,70);
+  assert.equal(enero.api.generarTextoWhatsApp(3),"");
+});
+
+test("index.html refleja la vigencia hasta el 31/12/2026 y la versión 2026-10-29a",()=>{
+  assert.doesNotMatch(html,/31\/10|31 de octubre|en octubre|Campaña de octubre/);
+  assert.match(html,/31 de diciembre de 2026/);
+  assert.equal(html.match(/\?v=2026-10-29a/g).length,3);
 });
 
 test("combinado mantiene los mismos totales y cuotas que cada alternativa",()=>{
@@ -417,9 +517,10 @@ test("combinado mantiene los mismos totales y cuotas que cada alternativa",()=>{
   assert.equal(textos[0].match(/Honorarios 20%\+IVA/g).length,2);
 });
 
-test("vencimiento automático no sobrepasa 31 de octubre",()=>{
-  const {api}=cargar("2026-10-30T15:00:00Z");
-  assert.equal(api.getVencimiento(),"31/10/2026");
+test("vencimiento automático no sobrepasa 31 de diciembre",()=>{
+  const {api}=cargar("2026-12-30T15:00:00Z");
+  assert.equal(api.getVencimiento(),"31/12/2026");
+  assert.equal(cargar("2026-10-30T15:00:00Z").api.getVencimiento(),"03/11/2026");
 });
 
 test("importes argentinos, decimales y entradas ambiguas se interpretan con seguridad",()=>{
@@ -500,9 +601,9 @@ test("la validez del mensaje respeta vencimiento manual y tope de campaña",()=>
   const texto=f.api.generarTextoWhatsApp(6);
   assert.match(texto,/Vence: sáb, 10\/10\/2026/);
   assert.match(texto,/Válida hasta la fecha indicada/); assert.doesNotMatch(texto,/48 hs/);
-  const fin=cargar("2026-10-30T15:00:00Z"); fin.el("inputPrimeraCuota").value="2026-10-30";
+  const fin=cargar("2026-12-30T15:00:00Z"); fin.el("inputPrimeraCuota").value="2026-12-30";
   fin.api.calcularPropuestas(); const cierre=fin.api.generarTextoWhatsApp(6);
-  assert.match(cierre,/Vence: sáb, 31\/10\/2026/); assert.doesNotMatch(cierre,/48 hs/);
+  assert.match(cierre,/Vence: jue, 31\/12\/2026/); assert.doesNotMatch(cierre,/48 hs/);
 });
 
 module.exports = {cargar};

@@ -33,57 +33,102 @@ test("topes 85/80/60 y nueve pagos solo con deuda mayor a 20 millones", () => {
   assert.equal(a.cuotasDisponiblesGalicia(20000000.01).includes(7), true);
 });
 
-test("vigencia y primera cuota en octubre se verifican al emitir", () => {
+test("vigencia y primera cuota dentro de campaña se verifican al emitir", () => {
   const a = cargar();
   const p = { deuda: 5000000, cuotas: 3, total: 1242000, ...contexto };
   assert.deepEqual(Array.from(a.validarPropuestaGalicia(p)), []);
   assert.ok(a.validarPropuestaGalicia({ ...p, fecha: "2026-10-06" }).length);
-  assert.ok(a.validarPropuestaGalicia({ ...p, fecha: "2026-11-01" }).length);
-  assert.ok(a.validarPropuestaGalicia({ ...p, primeraCuota: "2026-11-01" }).length);
+  assert.ok(a.validarPropuestaGalicia({ ...p, fecha: "2027-01-01", primeraCuota: "2027-01-01" }).length);
+  assert.ok(a.validarPropuestaGalicia({ ...p, primeraCuota: "2027-01-01" }).length);
   assert.ok(a.validarPropuestaGalicia({ ...p, primeraCuota: "2026-10-08" }).length);
   assert.ok(a.validarPropuestaGalicia({ ...p, total: p.total - .01 }).length);
 });
 
-test("cancelatorio fuera de octubre permite hasta 70% con emisión en octubre o noviembre", () => {
+test("prórroga: noviembre y diciembre habilitan 85/80/60, 9 pagos y TNA 0 hasta el 31/12 inclusive", () => {
   const a = cargar();
-  for (const fecha of ["2026-10-23", "2026-11-02"]) {
+  const propuesta = (cuotas, quita, fecha, primeraCuota, deuda = 1000000) => {
+    const p = a.calcularPlanGalicia(deuda, cuotas, quita);
+    return { deuda, cuotas, total: p.montoRecuperar, totalSinRedondeo: p.totalSinRedondeo,
+      quitaSolicitada: quita, fecha, primeraCuota, vencimiento: "2026-12-31" };
+  };
+  assert.equal(a.POLITICA_GALICIA.desde, "2026-10-07");
+  assert.equal(a.POLITICA_GALICIA.hasta, "2026-12-31");
+  for (const [fecha, primeraCuota] of [["2026-10-29", "2026-12-31"], ["2026-11-02", "2026-11-05"],
+    ["2026-12-01", "2026-12-15"], ["2026-12-31", "2026-12-31"]]) {
+    for (const [cuotas, quita] of [[1, .85], [2, .80], [3, .80], [4, .60], [5, .60], [6, .60]]) {
+      assert.deepEqual(Array.from(a.validarPropuestaGalicia(propuesta(cuotas, quita, fecha, primeraCuota))), [], `${cuotas} pagos ${fecha}`);
+      assert.ok(a.validarPropuestaGalicia(propuesta(cuotas, quita + .01, fecha, primeraCuota)).length, `${cuotas} pagos sobre tope ${fecha}`);
+    }
+    for (const cuotas of [7, 8, 9]) {
+      assert.deepEqual(Array.from(a.validarPropuestaGalicia(propuesta(cuotas, .60, fecha, primeraCuota, 20000000.01))), []);
+      assert.ok(a.validarPropuestaGalicia(propuesta(cuotas, .60, fecha, primeraCuota, 20000000)).length);
+    }
+    const cero = a.calcularAcuerdoGalicia(10000000, 24, 0);
+    const acuerdo = { deuda: 10000000, cuotas: 24, total: cero.montoRecuperar, totalSinRedondeo: cero.totalSinRedondeo,
+      modalidad: "acuerdo0", moraDias: 630, fecha, primeraCuota, vencimiento: "2026-12-31" };
+    assert.deepEqual(Array.from(a.validarPropuestaGalicia(acuerdo)), []);
+    assert.ok(a.validarPropuestaGalicia({ ...acuerdo, moraDias: 629 }).length);
+    assert.match(a.validarPropuestaGalicia({ ...acuerdo, vencimiento: "2027-01-01" }).join(" "), /31\/12\/2026/);
+  }
+  // 4 a 6 pagos conservan la lógica previa de primer pago: puede caer después del fin.
+  assert.deepEqual(Array.from(a.validarPropuestaGalicia(propuesta(6, .60, "2026-12-28", "2027-01-05"))), []);
+  // Desde el 01/01/2027 la campaña no rige: sin cuotas ni TNA 0.
+  for (const [cuotas, quita] of [[2, .80], [3, .80], [4, .60], [6, .60]]) {
+    assert.match(a.validarPropuestaGalicia(propuesta(cuotas, quita, "2027-01-01", "2027-01-04")).join(" "), /31\/12\/2026/);
+  }
+  const cero = a.calcularAcuerdoGalicia(10000000, 24, 0);
+  assert.ok(a.validarPropuestaGalicia({ deuda: 10000000, cuotas: 24, total: cero.montoRecuperar, modalidad: "acuerdo0",
+    moraDias: 630, fecha: "2027-01-01", primeraCuota: "2027-01-04" }).length);
+  // 2 y 3 pagos con primera cuota en enero quedan bloqueados aun emitiendo en diciembre.
+  for (const cuotas of [2, 3]) {
+    for (const quita of [.80, .70, .60]) {
+      assert.match(a.validarPropuestaGalicia(propuesta(cuotas, quita, "2026-12-28", "2027-01-04")).join(" "), /primera cuota.*31\/12\/2026/);
+    }
+  }
+  assert.ok(a.validarPropuestaGalicia(propuesta(1, .85, "2026-10-06", "2026-10-06")).length);
+});
+
+test("cancelatorio fuera de campaña permite hasta 70% con pago desde enero de 2027", () => {
+  const a = cargar();
+  for (const fecha of ["2026-10-23", "2026-12-28", "2027-01-04"]) {
     for (const quita of [.70, .60, 0]) {
       const plan = a.calcularPlanGalicia(1000000, 1, quita);
       const errores = a.validarPropuestaGalicia({ deuda: 1000000, cuotas: 1,
         total: plan.montoRecuperar, totalSinRedondeo: plan.totalSinRedondeo,
-        quitaSolicitada: quita, fecha, primeraCuota: "2026-11-05", vencimiento: "2026-11-04" });
+        quitaSolicitada: quita, fecha, primeraCuota: "2027-01-05", vencimiento: "2027-01-04" });
       assert.deepEqual(Array.from(errores), []);
     }
     for (const quita of [.7001, .75, .80, .85]) {
       const plan = a.calcularPlanGalicia(1000000, 1, quita);
       assert.ok(a.validarPropuestaGalicia({ deuda: 1000000, cuotas: 1,
         total: plan.montoRecuperar, totalSinRedondeo: plan.totalSinRedondeo,
-        quitaSolicitada: quita, fecha, primeraCuota: "2026-11-05" }).length);
+        quitaSolicitada: quita, fecha, primeraCuota: "2027-01-05" }).length);
     }
   }
 });
 
-test("la excepción cancelatoria conserva la campaña de octubre y no autoriza cuotas nuevas", () => {
+test("la excepción cancelatoria conserva la campaña y no autoriza cuotas nuevas", () => {
   const a = cargar();
   const propuesta = (cuotas, quita, fecha, primeraCuota) => {
     const p = a.calcularPlanGalicia(1000000, cuotas, quita);
     return { deuda: 1000000, cuotas, total: p.montoRecuperar, totalSinRedondeo: p.totalSinRedondeo,
       quitaSolicitada: quita, fecha, primeraCuota };
   };
-  assert.deepEqual(Array.from(a.validarPropuestaGalicia(propuesta(1, .85, "2026-10-23", "2026-10-31"))), []);
+  assert.deepEqual(Array.from(a.validarPropuestaGalicia(propuesta(1, .85, "2026-12-23", "2026-12-31"))), []);
   for (const cuotas of [2, 3]) {
-    assert.match(a.validarPropuestaGalicia(propuesta(cuotas, .70, "2026-10-23", "2026-11-05")).join(" "), /primera cuota.*octubre/);
+    assert.match(a.validarPropuestaGalicia(propuesta(cuotas, .70, "2026-12-23", "2027-01-05")).join(" "), /primera cuota.*31\/12\/2026/);
   }
   for (const cuotas of [4, 5, 6]) {
-    assert.deepEqual(Array.from(a.validarPropuestaGalicia(propuesta(cuotas, .60, "2026-10-23", "2026-11-05"))), []);
-    assert.ok(a.validarPropuestaGalicia(propuesta(cuotas, .70, "2026-10-23", "2026-11-05")).length);
-    assert.ok(a.validarPropuestaGalicia(propuesta(cuotas, .60, "2026-11-02", "2026-11-05")).length);
+    assert.deepEqual(Array.from(a.validarPropuestaGalicia(propuesta(cuotas, .60, "2026-12-23", "2027-01-05"))), []);
+    assert.ok(a.validarPropuestaGalicia(propuesta(cuotas, .70, "2026-12-23", "2027-01-05")).length);
+    assert.ok(a.validarPropuestaGalicia(propuesta(cuotas, .60, "2027-01-04", "2027-01-05")).length);
   }
-  const cancelatorio = propuesta(1, .70, "2026-11-02", "2026-11-05");
-  for (const primeraCuota of ["", "2026-11-01", "2026-11-31"]) {
+  const cancelatorio = propuesta(1, .70, "2027-01-04", "2027-01-05");
+  for (const primeraCuota of ["", "2027-01-03", "2027-01-32"]) {
     assert.ok(a.validarPropuestaGalicia({ ...cancelatorio, primeraCuota }).length);
   }
-  assert.ok(a.validarPropuestaGalicia({ ...cancelatorio, vencimiento: "2026-11-01" }).length);
+  assert.ok(a.validarPropuestaGalicia({ ...cancelatorio, vencimiento: "2027-01-03" }).length);
+  assert.deepEqual(Array.from(a.validarPropuestaGalicia({ ...cancelatorio, vencimiento: "2027-02-15" })), []);
 });
 
 test("24 meses TNA 0 incluye exactamente 10 millones y 630 días, sin planes TNA 20", () => {
