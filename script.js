@@ -1029,42 +1029,42 @@ let _countdownInterval = null;
 function crearTextoPropuestaGalicia(plan, estado, manual = false) {
   const productos = (estado.productos || []).filter(p=>p.tipo!=="Honorarios de Gestión Extrajudicial");
   const detalleProductos = productos.length ? productos.map(p=>p.tipo+(p.numero ? " · "+p.numero : "")).join("\n") : "(según acuerdo)";
-  const condicion = plan.modalidad === "acuerdo0" ? "🏷️ TNA 0% · Sin quita"
-    : "🏷️ Descuento aplicado: "+Number(plan.porcentaje.toFixed(2))+"%";
+  const condicion = plan.modalidad === "acuerdo0" ? "TNA 0% · Sin quita"
+    : "Descuento aplicado: "+Number(plan.porcentaje.toFixed(2))+"%";
   const detalle = campo => !plan.anticipo && plan.cuotas > 1 && plan.pagos[0][campo] === plan.pagos.at(-1)[campo]
     ? plan.cuotas+" de "+formatARS(plan.pagos[0][campo]) : detalleCuentaGalicia(plan,campo);
-  const cuota = plan.anticipo || plan.valorCuota !== plan.ultimaCuota ? "📅 Forma de pago: "+detalleCuentaGalicia(plan,"importe")
-    : plan.cancelacion ? "📅 Pago cancelatorio (único): "+formatARS(plan.valorCuota)
-    : plan.cuotas === 1 ? "📅 Valor del pago: "+formatARS(plan.valorCuota)
-    : "📅 Valor de cada cuota: "+formatARS(plan.valorCuota)+" x "+plan.cuotas+" meses";
+  const cuota = plan.anticipo || plan.valorCuota !== plan.ultimaCuota ? "Forma de pago: "+detalleCuentaGalicia(plan,"importe")
+    : plan.cancelacion ? "Pago cancelatorio (único): "+formatARS(plan.valorCuota)
+    : plan.cuotas === 1 ? "Valor del pago: "+formatARS(plan.valorCuota)
+    : "Valor de cada cuota: "+formatARS(plan.valorCuota)+" x "+plan.cuotas+" meses";
   const vencimiento = contextoPoliticaGalicia(manual).vencimiento || vencimientoAutomaticoGalicia(plan, manual);
   const diaVence = new Date(vencimiento+"T12:00:00Z").toLocaleDateString("es-AR",{
     weekday:"short",timeZone:"America/Argentina/Buenos_Aires"}).replace(/\.$/,"");
   const validez = contextoPoliticaGalicia(manual).vencimiento || vencimiento === POLITICA_GALICIA.hasta
     ? "Válida hasta la fecha indicada." : "Válida 48 hs hábiles.";
-  return `🏦 BANCO GALICIA — Regularización de Deuda
-📋 Mora Tardía · Extrajudicial
-📆 Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${diaVence}, ${formatearFechaGalicia(vencimiento)}
+  return `BANCO GALICIA — Regularización de saldo pendiente
+Mora Tardía · Extrajudicial
+Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${diaVence}, ${formatearFechaGalicia(vencimiento)}
 
 Estimado/a ${estado.nombre || ""} (DNI: ${estado.dni || ""}),
-Le acercamos la siguiente propuesta de pago para regularizar su deuda con Banco Galicia, gestionada por Estudio CO-RE. Sujeta a su confirmación.
+Le acercamos una propuesta de pago para regularizar su saldo pendiente con Banco Galicia. Estudio CO-RE gestiona la propuesta, que queda sujeta a su confirmación.
 
-📌 PROPUESTA DE PAGO: ${plan.cancelacion ? "CANCELACIÓN (PAGO ÚNICO)" : plan.cuotas+" "+(plan.cuotas === 1 ? "PAGO" : "PAGOS")}
+PROPUESTA DE PAGO: ${plan.cancelacion ? "CANCELACIÓN (PAGO ÚNICO)" : plan.cuotas+" "+(plan.cuotas === 1 ? "PAGO" : "PAGOS")}
 ${condicion}
-💰 Monto total a regularizar: ${formatARS(plan.montoRecuperar)}
+Monto total a regularizar: ${formatARS(plan.montoRecuperar)}
 ${cuota}
 
-📦 Productos incluidos:
+Productos incluidos:
 ${detalleProductos}
 
-🏧 DATOS DE PAGO — total ${formatARS(plan.montoRecuperar)}, en 2 cuentas:
+DATOS DE PAGO — total ${formatARS(plan.montoRecuperar)}, en 2 cuentas:
 1) Capital → Banco Galicia · ${CUENTAS.recaudacion.alias} · CBU ${CUENTAS.recaudacion.cbu}
 Importe: ${formatARS(plan.capitalBanco)} (${detalle("banco")})
 2) Honorarios 20%+IVA → Estudio CO-RE · ${CUENTAS.honorarios.alias} · CBU ${CUENTAS.honorarios.cbu}
 Importe: ${formatARS(plan.honorariosAgencia)} (${detalle("honorarios")})
 Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal.
 
-⚠️ ${validez} Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
+${validez} Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
 }
 
 function planActualVigenteGalicia(cuotas) {

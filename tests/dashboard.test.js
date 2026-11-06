@@ -61,33 +61,33 @@ function cargar(fecha = "2026-10-09T15:00:00Z") {
     productos:(lista,manual=false)=>{if(manual)productosManual=lista;else productos=lista;}};
 }
 
-test("el WhatsApp recupera íntegro el mensaje original, con productos y totales por cuenta",()=>{
+test("el WhatsApp incluye el saldo pendiente, los productos y los totales por cuenta",()=>{
   const {api,productos}=cargar();
   productos([{tipo:"Préstamo Personal",numero:"REF-PRUEBA"}]);
   api.calcularPropuestas();
-  assert.equal(api.generarTextoWhatsApp(6),`🏦 BANCO GALICIA — Regularización de Deuda
-📋 Mora Tardía · Extrajudicial
-📆 Emisión: 09/10/2026 · Vence: mar, 13/10/2026
+  assert.equal(api.generarTextoWhatsApp(6),`BANCO GALICIA — Regularización de saldo pendiente
+Mora Tardía · Extrajudicial
+Emisión: 09/10/2026 · Vence: mar, 13/10/2026
 
 Estimado/a Prueba (DNI: 12345678),
-Le acercamos la siguiente propuesta de pago para regularizar su deuda con Banco Galicia, gestionada por Estudio CO-RE. Sujeta a su confirmación.
+Le acercamos una propuesta de pago para regularizar su saldo pendiente con Banco Galicia. Estudio CO-RE gestiona la propuesta, que queda sujeta a su confirmación.
 
-📌 PROPUESTA DE PAGO: 6 PAGOS
-🏷️ Descuento aplicado: 60%
-💰 Monto total a regularizar: $ 3.185.022
-📅 Valor de cada cuota: $ 530.837 x 6 meses
+PROPUESTA DE PAGO: 6 PAGOS
+Descuento aplicado: 60%
+Monto total a regularizar: $ 3.185.022
+Valor de cada cuota: $ 530.837 x 6 meses
 
-📦 Productos incluidos:
+Productos incluidos:
 Préstamo Personal · REF-PRUEBA
 
-🏧 DATOS DE PAGO — total $ 3.185.022, en 2 cuentas:
+DATOS DE PAGO — total $ 3.185.022, en 2 cuentas:
 1) Capital → Banco Galicia · GALICIALEG · CBU 0070686120000002247308
 Importe: $ 2.564.430 (6 de $ 427.405)
 2) Honorarios 20%+IVA → Estudio CO-RE · GALICIAHONORARIOS · CBU 0070999030004062897261
 Importe: $ 620.592 (6 de $ 103.432)
 Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal.
 
-⚠️ Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`);
+Válida 48 hs hábiles. Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`);
 });
 
 test("todas las salidas de texto incluyen productos, capital, honorarios y ambas cuentas",()=>{
@@ -105,6 +105,9 @@ test("todas las salidas de texto incluyen productos, capital, honorarios y ambas
   f.el("inputDeuda").value="5000000"; f.el("inputMontoCliente").value="3185011";
   f.api.calcularInverso(); mensajes.push(f.api.generarTextoWhatsApp(6));
   for(const mensaje of mensajes) {
+    assert.match(mensaje,/saldo pendiente/i);
+    assert.doesNotMatch(mensaje,/\bdeudas?\b/i);
+    assert.doesNotMatch(mensaje,/\p{Extended_Pictographic}/u);
     for(const dato of ["Productos incluidos:","Capital → Banco Galicia","Honorarios 20%+IVA","Importe:","GALICIALEG","GALICIAHONORARIOS","0070686120000002247308","0070999030004062897261"]) assert.ok(mensaje.includes(dato),dato);
     assert.match(mensaje,/REF-(CALC|MANUAL)/);
   }
@@ -500,10 +503,10 @@ test("prórroga: el 31/12 es inclusivo y el vencimiento automático se recorta a
   assert.equal(enero.api.generarTextoWhatsApp(3),"");
 });
 
-test("index.html refleja la vigencia hasta el 31/12/2026 y la versión 2026-10-29a",()=>{
+test("index.html refleja la vigencia hasta el 31/12/2026 y la versión 2026-11-06a",()=>{
   assert.doesNotMatch(html,/31\/10|31 de octubre|en octubre|Campaña de octubre/);
   assert.match(html,/31 de diciembre de 2026/);
-  assert.equal(html.match(/\?v=2026-10-29a/g).length,3);
+  assert.equal(html.match(/\?v=2026-11-06a/g).length,3);
 });
 
 test("combinado mantiene los mismos totales y cuotas que cada alternativa",()=>{
