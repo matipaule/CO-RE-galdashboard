@@ -72,7 +72,6 @@ Saldo pendiente total con honorarios: $ 7.962.552,67.
 
 BENEFICIO DE PAGO: 6 PAGOS
 Beneficio aplicado: 60% de quita
-Monto total a regularizar: $ 3.185.022 (capital + honorarios incluidos)
 Valor de cada cuota: $ 530.837 x 6 meses
 Fecha del primer pago: 09/10/2026
 Emisión: 09/10/2026 · Vence: mar, 13/10/2026
@@ -110,7 +109,8 @@ test("los mensajes individuales incluyen productos, capital, honorarios y ambas 
     assert.match(mensaje,/beneficio/i);
     assert.ok(mensaje.includes("Saldo pendiente original con Banco Galicia: $ "+saldosOriginales[i]));
     assert.match(mensaje,/Saldo pendiente total con honorarios: \$\s[\d.]+,\d{2}/);
-    assert.match(mensaje,/Monto total a regularizar: \$\s[\d.]+ \(capital \+ honorarios incluidos\)/);
+    assert.doesNotMatch(mensaje,/Monto total a regularizar/);
+    assert.match(mensaje,/DATOS DE PAGO — total \$\s[\d.]+, en 2 cuentas/);
     assert.match(mensaje,/Fecha del primer pago: 09\/10\/2026/);
     for(const dato of ["Productos incluidos:","Capital → Banco Galicia","Honorarios 20%+IVA","Importe:","GALICIALEG","GALICIAHONORARIOS","0070686120000002247308","0070999030004062897261"]) assert.ok(mensaje.includes(dato),dato);
     assert.match(mensaje,/REF-(CALC|MANUAL)/);
@@ -125,7 +125,7 @@ test("WhatsApp conserva los centavos del saldo original y las fechas de cada for
   const texto=f.api.generarTextoWhatsApp(1);
   assert.match(texto,/Saldo pendiente original con Banco Galicia: \$\s6\.411\.073,25/);
   assert.match(texto,/Saldo pendiente total con honorarios: \$\s7\.962\.552,98/);
-  assert.match(texto,/Monto total a regularizar: \$\s1\.194\.384 \(capital \+ honorarios incluidos\)/);
+  assert.match(texto,/Valor del pago: \$\s1\.194\.384/);
   assert.match(texto,/Fecha del primer pago: 20\/11\/2026/);
   for(const [i,modalidad] of ["cancelacion","quita","acuerdo0"].entries()) {
     f.el("manualModalidad").value=modalidad;
@@ -547,10 +547,10 @@ test("prórroga: el 31/12 es inclusivo y el vencimiento automático se recorta a
   assert.equal(enero.api.generarTextoWhatsApp(3),"");
 });
 
-test("index.html refleja la vigencia hasta el 31/12/2026 y la versión 2026-11-13b",()=>{
+test("index.html refleja la vigencia hasta el 31/12/2026 y la versión 2026-11-13c",()=>{
   assert.doesNotMatch(html,/31\/10|31 de octubre|en octubre|Campaña de octubre/);
   assert.match(html,/31 de diciembre de 2026/);
-  assert.equal(html.match(/\?v=2026-11-13b/g).length,3);
+  assert.equal(html.match(/\?v=2026-11-13c/g).length,3);
 });
 
 test("alternativas muestra el saldo una vez y conserva los importes en un resumen breve",()=>{
@@ -558,8 +558,10 @@ test("alternativas muestra el saldo una vez y conserva los importes en un resume
   api.toggleCeldaEscenario(85,1,0,0); api.toggleCeldaEscenario(60,6,0,0);
   api.copiarPropuestaCombinada();
   const texto=textos[0];
-  assert.match(texto,/1\) Cancelación en 1 pago de \$\s1\.194\.384\. Beneficio: 85% de quita/);
-  assert.match(texto,/2\) 6 cuotas de \$\s530\.837\. Total \$\s3\.185\.022\. Beneficio: 60% de quita/);
+  assert.match(texto,/1\) Cancelación en 1 pago\. Beneficio: 85% de quita/);
+  assert.match(texto,/2\) 6 cuotas de \$\s530\.837\. Beneficio: 60% de quita/);
+  assert.match(texto,/Total: \$\s1\.194\.384 · Banco Galicia: \$\s961\.662 · Honorarios \(Estudio CO-RE\): \$\s232\.722/);
+  assert.match(texto,/Total: \$\s3\.185\.022 · Banco Galicia: \$\s2\.564\.430 · Honorarios \(Estudio CO-RE\): \$\s620\.592/);
   assert.equal(texto.match(/Saldo pendiente original con Banco Galicia: \$\s6\.411\.073,00/g).length,1);
   assert.equal(texto.match(/Saldo pendiente total con honorarios: \$\s7\.962\.552,67/g).length,1);
   assert.match(texto,/honorarios incluidos/);

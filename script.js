@@ -855,9 +855,10 @@ function copiarPropuestaCombinada() {
   const contexto = contextoPoliticaGalicia();
   const vencimiento = contexto.vencimiento || opciones.map(plan=>vencimientoAutomaticoGalicia(plan)).sort()[0];
   const alternativas = opciones.map((plan,i)=>{
-    const pagos = plan.cuotas === 1 ? "Cancelación en 1 pago de "+formatARS(plan.montoRecuperar)
-      : describirPagosGalicia(plan)+". Total "+formatARS(plan.montoRecuperar);
-    return (i+1)+") "+pagos+". Beneficio: "+Number(plan.porcentaje.toFixed(2))+"% de quita.";
+    const pagos = plan.cuotas === 1 ? "Cancelación en 1 pago" : describirPagosGalicia(plan);
+    return (i+1)+") "+pagos+". Beneficio: "+Number(plan.porcentaje.toFixed(2))+"% de quita.\n"+
+      "Total: "+formatARS(plan.montoRecuperar)+" · Banco Galicia: "+formatARS(plan.capitalBanco)+
+      " · Honorarios (Estudio CO-RE): "+formatARS(plan.honorariosAgencia)+".";
   }).join("\n");
   copiarTexto(`${encabezadoPropuestaGalicia(estado)}
 
@@ -1068,7 +1069,6 @@ function crearTextoPropuestaGalicia(plan, estado, manual = false) {
 
 BENEFICIO DE PAGO: ${plan.cancelacion ? "CANCELACIÓN (PAGO ÚNICO)" : plan.cuotas+" "+(plan.cuotas === 1 ? "PAGO" : "PAGOS")}
 ${condicion}
-Monto total a regularizar: ${formatARS(plan.montoRecuperar)} (capital + honorarios incluidos)
 ${cuota}
 Fecha del primer pago: ${formatearFechaGalicia(contexto.primeraCuota)}
 Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${diaVence}, ${formatearFechaGalicia(vencimiento)}
