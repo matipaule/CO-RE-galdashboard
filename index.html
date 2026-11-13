@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=2026-11-13a" />
+  <link rel="stylesheet" href="style.css?v=2026-11-13b" />
   <!-- jsPDF via CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.4.0/jspdf.umd.min.js"></script>
 </head>
@@ -242,8 +242,9 @@
           <div id="seleccionLista"></div>
           <div class="panel-sel-footer" id="panelSelFooter" style="display:none;">
             <button class="btn-propuesta-combinada" onclick="copiarPropuestaCombinada()">
-              💬 Copiar propuestas seleccionadas
+              Copiar alternativas (resumen)
             </button>
+            <p class="tabla-esc-nota">Para copiar el detalle con datos de pago, usá WhatsApp en la tarjeta de la alternativa elegida.</p>
           </div>
         </div>
 
@@ -505,8 +506,8 @@
           <div class="guia-item">
             <div class="guia-num">03</div>
             <div class="guia-content">
-              <div class="guia-tag">CIERRE BCRA</div>
-              <p>"Con este pago iniciamos la actualización de su libre deuda en BCRA."</p>
+              <div class="guia-tag">REGULARIZACIÓN DEL SALDO</div>
+              <p>"Con este pago iniciamos la regularización de su saldo pendiente con Banco Galicia."</p>
             </div>
           </div>
         </div>
@@ -793,7 +794,7 @@
   <div class="toast" id="toast"></div>
 
   <!-- ?v= obliga al navegador a bajar la versión nueva. Cambiar la fecha cada vez que se suben cambios. -->
-  <script src="politicas.js?v=2026-11-13a"></script>
-  <script src="script.js?v=2026-11-13a"></script>
+  <script src="politicas.js?v=2026-11-13b"></script>
+  <script src="script.js?v=2026-11-13b"></script>
 </body>
 </html>

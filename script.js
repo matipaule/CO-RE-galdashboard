@@ -852,9 +852,22 @@ function copiarPropuestaCombinada() {
   const estado = estadoFormularioGalicia(deuda);
   const opciones = [..._escSeleccion.values()].map(({quita,cuotas})=>calcularPlan(deuda,cuotas,quita/100));
   if (!opciones.length || opciones.some(plan=>!autorizarEmisionGalicia(deuda,plan))) return;
-  const texto = opciones.map((plan,i)=>(opciones.length > 1 ? "ALTERNATIVA "+(i+1)+"\n\n" : "")+
-    crearTextoPropuestaGalicia(plan,estado)).join("\n\n────────────\n\n");
-  copiarTexto(texto);
+  const contexto = contextoPoliticaGalicia();
+  const vencimiento = contexto.vencimiento || opciones.map(plan=>vencimientoAutomaticoGalicia(plan)).sort()[0];
+  const alternativas = opciones.map((plan,i)=>{
+    const pagos = plan.cuotas === 1 ? "Cancelación en 1 pago de "+formatARS(plan.montoRecuperar)
+      : describirPagosGalicia(plan)+". Total "+formatARS(plan.montoRecuperar);
+    return (i+1)+") "+pagos+". Beneficio: "+Number(plan.porcentaje.toFixed(2))+"% de quita.";
+  }).join("\n");
+  copiarTexto(`${encabezadoPropuestaGalicia(estado)}
+
+Beneficios disponibles (capital y honorarios incluidos):
+${alternativas}
+
+Fecha del primer pago: ${formatearFechaGalicia(contexto.primeraCuota)}
+Válido hasta: ${formatearFechaGalicia(vencimiento)}. Sujeto a confirmación.
+Indique qué alternativa prefiere para recibir el detalle de pago.
+Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`);
 }
 
 function generarPDFDesdeSeleccion(quita, cuotas) {
@@ -1026,13 +1039,20 @@ function calcularVencimiento48hs() { return formatearFechaGalicia(vencimientoAut
 function getVencimiento() { return getVencimientoPDF(); }
 let _countdownInterval = null;
 
+function encabezadoPropuestaGalicia(estado) {
+  const formato = new Intl.NumberFormat("es-AR", {style:"currency", currency:"ARS"});
+  return `BANCO GALICIA - Estudio CO-RE
+Estimado/a ${estado.nombre || ""} (DNI: ${estado.dni || ""}),
+Saldo pendiente original con Banco Galicia: ${formato.format(estado.deuda)} (capital).
+Saldo pendiente total con honorarios: ${formato.format(minimoTotalGalicia(estado.deuda, 0)/100)}.`;
+}
+
 function crearTextoPropuestaGalicia(plan, estado, manual = false) {
-  const saldoOriginal = estado.deuda.toLocaleString("es-AR", {style:"currency", currency:"ARS"});
   const contexto = contextoPoliticaGalicia(manual);
   const productos = (estado.productos || []).filter(p=>p.tipo!=="Honorarios de Gestión Extrajudicial");
   const detalleProductos = productos.length ? productos.map(p=>p.tipo+(p.numero ? " · "+p.numero : "")).join("\n") : "(según acuerdo)";
-  const condicion = plan.modalidad === "acuerdo0" ? "TNA 0% · Sin quita"
-    : "Descuento aplicado: "+Number(plan.porcentaje.toFixed(2))+"%";
+  const condicion = plan.modalidad === "acuerdo0" ? "Beneficio: TNA 0% · Sin quita"
+    : "Beneficio aplicado: "+Number(plan.porcentaje.toFixed(2))+"% de quita";
   const detalle = campo => !plan.anticipo && plan.cuotas > 1 && plan.pagos[0][campo] === plan.pagos.at(-1)[campo]
     ? plan.cuotas+" de "+formatARS(plan.pagos[0][campo]) : detalleCuentaGalicia(plan,campo);
   const cuota = plan.anticipo || plan.valorCuota !== plan.ultimaCuota ? "Forma de pago: "+detalleCuentaGalicia(plan,"importe")
@@ -1044,20 +1064,14 @@ function crearTextoPropuestaGalicia(plan, estado, manual = false) {
     weekday:"short",timeZone:"America/Argentina/Buenos_Aires"}).replace(/\.$/,"");
   const validez = contexto.vencimiento || vencimiento === POLITICA_GALICIA.hasta
     ? "Válida hasta la fecha indicada." : "Válida 48 hs hábiles.";
-  return `BANCO GALICIA — Regularización de saldo pendiente
-Mora Tardía · Extrajudicial
-Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${diaVence}, ${formatearFechaGalicia(vencimiento)}
+  return `${encabezadoPropuestaGalicia(estado)}
 
-Estimado/a ${estado.nombre || ""} (DNI: ${estado.dni || ""}),
-Le acercamos una propuesta de pago para regularizar su saldo pendiente con Banco Galicia. Estudio CO-RE gestiona la propuesta, que queda sujeta a su confirmación.
-
-Saldo pendiente original con Banco Galicia (antes de quita y honorarios): ${saldoOriginal}
-
-PROPUESTA DE PAGO: ${plan.cancelacion ? "CANCELACIÓN (PAGO ÚNICO)" : plan.cuotas+" "+(plan.cuotas === 1 ? "PAGO" : "PAGOS")}
+BENEFICIO DE PAGO: ${plan.cancelacion ? "CANCELACIÓN (PAGO ÚNICO)" : plan.cuotas+" "+(plan.cuotas === 1 ? "PAGO" : "PAGOS")}
 ${condicion}
 Monto total a regularizar: ${formatARS(plan.montoRecuperar)} (capital + honorarios incluidos)
 ${cuota}
 Fecha del primer pago: ${formatearFechaGalicia(contexto.primeraCuota)}
+Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${diaVence}, ${formatearFechaGalicia(vencimiento)}
 
 Productos incluidos:
 ${detalleProductos}
@@ -1069,7 +1083,7 @@ Importe: ${formatARS(plan.capitalBanco)} (${detalle("banco")})
 Importe: ${formatARS(plan.honorariosAgencia)} (${detalle("honorarios")})
 Cuentas a nombre de Maria Valeria Fandiño CUIT 27-20481581-5, facultada por Banco Galicia. Verifique en su sucursal.
 
-${validez} Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
+Sujeto a confirmación. ${validez} Consultas: 0800-345-9707 · WhatsApp: 11-5897-7596`;
 }
 
 function planActualVigenteGalicia(cuotas) {
