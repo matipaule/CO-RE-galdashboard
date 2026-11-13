@@ -1027,6 +1027,8 @@ function getVencimiento() { return getVencimientoPDF(); }
 let _countdownInterval = null;
 
 function crearTextoPropuestaGalicia(plan, estado, manual = false) {
+  const saldoOriginal = estado.deuda.toLocaleString("es-AR", {style:"currency", currency:"ARS"});
+  const contexto = contextoPoliticaGalicia(manual);
   const productos = (estado.productos || []).filter(p=>p.tipo!=="Honorarios de Gestión Extrajudicial");
   const detalleProductos = productos.length ? productos.map(p=>p.tipo+(p.numero ? " · "+p.numero : "")).join("\n") : "(según acuerdo)";
   const condicion = plan.modalidad === "acuerdo0" ? "TNA 0% · Sin quita"
@@ -1037,10 +1039,10 @@ function crearTextoPropuestaGalicia(plan, estado, manual = false) {
     : plan.cancelacion ? "Pago cancelatorio (único): "+formatARS(plan.valorCuota)
     : plan.cuotas === 1 ? "Valor del pago: "+formatARS(plan.valorCuota)
     : "Valor de cada cuota: "+formatARS(plan.valorCuota)+" x "+plan.cuotas+" meses";
-  const vencimiento = contextoPoliticaGalicia(manual).vencimiento || vencimientoAutomaticoGalicia(plan, manual);
+  const vencimiento = contexto.vencimiento || vencimientoAutomaticoGalicia(plan, manual);
   const diaVence = new Date(vencimiento+"T12:00:00Z").toLocaleDateString("es-AR",{
     weekday:"short",timeZone:"America/Argentina/Buenos_Aires"}).replace(/\.$/,"");
-  const validez = contextoPoliticaGalicia(manual).vencimiento || vencimiento === POLITICA_GALICIA.hasta
+  const validez = contexto.vencimiento || vencimiento === POLITICA_GALICIA.hasta
     ? "Válida hasta la fecha indicada." : "Válida 48 hs hábiles.";
   return `BANCO GALICIA — Regularización de saldo pendiente
 Mora Tardía · Extrajudicial
@@ -1049,10 +1051,13 @@ Emisión: ${formatearFechaGalicia(hoyArgentina())} · Vence: ${diaVence}, ${form
 Estimado/a ${estado.nombre || ""} (DNI: ${estado.dni || ""}),
 Le acercamos una propuesta de pago para regularizar su saldo pendiente con Banco Galicia. Estudio CO-RE gestiona la propuesta, que queda sujeta a su confirmación.
 
+Saldo pendiente original con Banco Galicia (antes de quita y honorarios): ${saldoOriginal}
+
 PROPUESTA DE PAGO: ${plan.cancelacion ? "CANCELACIÓN (PAGO ÚNICO)" : plan.cuotas+" "+(plan.cuotas === 1 ? "PAGO" : "PAGOS")}
 ${condicion}
-Monto total a regularizar: ${formatARS(plan.montoRecuperar)}
+Monto total a regularizar: ${formatARS(plan.montoRecuperar)} (capital + honorarios incluidos)
 ${cuota}
+Fecha del primer pago: ${formatearFechaGalicia(contexto.primeraCuota)}
 
 Productos incluidos:
 ${detalleProductos}

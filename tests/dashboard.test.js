@@ -72,10 +72,13 @@ Emisión: 09/10/2026 · Vence: mar, 13/10/2026
 Estimado/a Prueba (DNI: 12345678),
 Le acercamos una propuesta de pago para regularizar su saldo pendiente con Banco Galicia. Estudio CO-RE gestiona la propuesta, que queda sujeta a su confirmación.
 
+Saldo pendiente original con Banco Galicia (antes de quita y honorarios): $ 6.411.073,00
+
 PROPUESTA DE PAGO: 6 PAGOS
 Descuento aplicado: 60%
-Monto total a regularizar: $ 3.185.022
+Monto total a regularizar: $ 3.185.022 (capital + honorarios incluidos)
 Valor de cada cuota: $ 530.837 x 6 meses
+Fecha del primer pago: 09/10/2026
 
 Productos incluidos:
 Préstamo Personal · REF-PRUEBA
@@ -104,14 +107,41 @@ test("todas las salidas de texto incluyen productos, capital, honorarios y ambas
   f.api.calcularAcuerdoDesdeFormulario("acuerdo0","texto"); mensajes.push(f.textos.at(-1));
   f.el("inputDeuda").value="5000000"; f.el("inputMontoCliente").value="3185011";
   f.api.calcularInverso(); mensajes.push(f.api.generarTextoWhatsApp(6));
-  for(const mensaje of mensajes) {
+  const saldosOriginales = ["6.411.073,00","6.411.073,00","6.411.073,00","5.000.000,00","12.000.000,00","5.000.000,00"];
+  for(const [i,mensaje] of mensajes.entries()) {
     assert.match(mensaje,/saldo pendiente/i);
     assert.doesNotMatch(mensaje,/\bdeudas?\b/i);
     assert.doesNotMatch(mensaje,/\p{Extended_Pictographic}/u);
+    assert.ok(mensaje.includes("Saldo pendiente original con Banco Galicia (antes de quita y honorarios): $ "+saldosOriginales[i]));
+    assert.match(mensaje,/Monto total a regularizar: \$\s[\d.]+ \(capital \+ honorarios incluidos\)/);
+    assert.match(mensaje,/Fecha del primer pago: 09\/10\/2026/);
     for(const dato of ["Productos incluidos:","Capital → Banco Galicia","Honorarios 20%+IVA","Importe:","GALICIALEG","GALICIAHONORARIOS","0070686120000002247308","0070999030004062897261"]) assert.ok(mensaje.includes(dato),dato);
     assert.match(mensaje,/REF-(CALC|MANUAL)/);
   }
   assert.ok(mensajes[3].includes("REF-MANUAL")); assert.ok(!mensajes[3].includes("REF-CALC"));
+});
+
+test("WhatsApp conserva los centavos del saldo original y las fechas de cada formulario",()=>{
+  const f=cargar("2026-11-13T15:00:00Z");
+  f.el("inputDeuda").value="6.411.073,25"; f.el("inputPrimeraCuota").value="2026-11-20";
+  f.api.calcularPropuestas();
+  const texto=f.api.generarTextoWhatsApp(1);
+  assert.match(texto,/Saldo pendiente original con Banco Galicia \(antes de quita y honorarios\): \$\s6\.411\.073,25/);
+  assert.match(texto,/Monto total a regularizar: \$\s1\.194\.384 \(capital \+ honorarios incluidos\)/);
+  assert.match(texto,/Fecha del primer pago: 20\/11\/2026/);
+  for(const [i,modalidad] of ["cancelacion","quita","acuerdo0"].entries()) {
+    f.el("manualModalidad").value=modalidad;
+    f.el("manualDeuda").value="12000000.25"; f.el("manualPrimeraCuota").value="2026-12-01";
+    f.el("manualCapital").value=modalidad === "acuerdo0" ? "14904000.32" : "7452001";
+    f.el("manualMora").value="630";
+    f.api.generarTextoManual();
+    assert.equal(f.textos.length,i+1);
+    const manual=f.textos.at(-1);
+    assert.match(manual,/Saldo pendiente original con Banco Galicia \(antes de quita y honorarios\): \$\s12\.000\.000,25/);
+    assert.match(manual,/Fecha del primer pago: 01\/12\/2026/);
+    assert.doesNotMatch(manual,/6\.411\.073,25|20\/11\/2026|\bdeudas?\b|\p{Extended_Pictographic}/u);
+  }
+  assert.deepEqual(f.alertas,[]);
 });
 
 test("dashboard normal, tabla y WhatsApp usan los nuevos topes y los mismos importes",()=>{
@@ -503,10 +533,10 @@ test("prórroga: el 31/12 es inclusivo y el vencimiento automático se recorta a
   assert.equal(enero.api.generarTextoWhatsApp(3),"");
 });
 
-test("index.html refleja la vigencia hasta el 31/12/2026 y la versión 2026-11-06a",()=>{
+test("index.html refleja la vigencia hasta el 31/12/2026 y la versión 2026-11-13a",()=>{
   assert.doesNotMatch(html,/31\/10|31 de octubre|en octubre|Campaña de octubre/);
   assert.match(html,/31 de diciembre de 2026/);
-  assert.equal(html.match(/\?v=2026-11-06a/g).length,3);
+  assert.equal(html.match(/\?v=2026-11-13a/g).length,3);
 });
 
 test("combinado mantiene los mismos totales y cuotas que cada alternativa",()=>{
@@ -583,7 +613,7 @@ test("el caso de la captura es entero y consistente en tarjeta, WhatsApp y PDF",
   api.copiarWASeleccion(85,1); api.generarPDF(1);
   for(const texto of [textos[0],pdfs[0].texto]) {
     for(const dato of ["1.478.225","1.190.197","288.028"]) assert.ok(texto.includes(dato),dato);
-    assert.doesNotMatch(texto,/\$\s*[\d.]+,\d+/);
+    assert.doesNotMatch(texto.replace(/^Saldo pendiente original.*$/m,""),/\$\s*[\d.]+,\d+/);
   }
   assert.equal(api.formatARS(1520.98),"$ 1.521");
   assert.equal(api.formatARS(1521),"$ 1.521");
